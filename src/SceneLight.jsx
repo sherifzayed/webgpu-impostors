@@ -7,16 +7,16 @@ export default function SceneLight() {
       <color attach="background" args={["#666971"]} />
       <directionalLight
         castShadow
-        intensity={3}
-        position={[0, 4, 8]}
-        shadow-mapSize={2048}
-        shadow-camera-near={20}
-        shadow-camera-far={60}
-        shadow-camera-left={-10}
-        shadow-camera-right={10}
-        shadow-camera-top={10}
-        shadow-camera-bottom={-10}
-        shadow-bias={0.0001}
+        intensity={3.4}
+        position={[35, 55, 35]}
+        shadow-mapSize={4096}
+        shadow-camera-near={0.5}
+        shadow-camera-far={180}
+        shadow-camera-left={-145}
+        shadow-camera-right={145}
+        shadow-camera-top={145}
+        shadow-camera-bottom={-145}
+        shadow-bias={-0.0001}
         shadow-normalBias={0.017}
       />
 
