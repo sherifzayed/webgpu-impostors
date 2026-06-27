@@ -6,16 +6,40 @@ import TreeOctahedralImpostorField from "./TreeOctahedralImpostorField";
 import TreeOctahedralImpostor from "./TreeOctahedralImpostor";
 import TreeOctahedralImpostorCompute from "./TreeOctahedralImpostorCompute"; // New: WebGPU Compute-based
 import TreeOctahedralImpostorFieldCompute from "./TreeOctahedralImpostorFieldCompute"; // New: WebGPU Compute-based field with atlas caching
-import { Gltf, Loader, OrbitControls } from "@react-three/drei";
+import OctahedralImpostorLODField from "./OctahedralImpostorLODField"; // New: single-draw-call field with close-up real-mesh LOD swap
+import { Gltf, Loader, OrbitControls, Stats } from "@react-three/drei";
 import GridWrapper from "./GridWrapper";
+import { useControls } from "leva";
 
 export default function App() {
+  const { count, lodDistance, maxNearInstances } = useControls({
+    count: {
+      min: 100,
+      max: 50000,
+      value: 1000,
+      step: 100,
+    },
+    lodDistance: {
+      min: 0,
+      max: 80,
+      value: 15,
+    },
+    maxNearInstances: {
+      min: 1,
+      max: 1000,
+      value: 100,
+      step: 10,
+    },
+  });
+
   return (
     <>
       <Canvas
         gl={async (props) => {
           extend(THREE);
           const renderer = new THREE.WebGPURenderer(props);
+          renderer.shadowMap.enabled = false;
+          renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
           await renderer.init();
           return renderer;
@@ -30,46 +54,30 @@ export default function App() {
         <Suspense fallback={null}>
           <SceneLight />
           <OrbitControls maxPolarAngle={Math.PI / 2} />
-
-          {/* <TreeOctahedralImpostorField
-            // modelPath="/tree.gltf"
-            modelPath="/tree.glb"
-            // modelPath="/car.gltf" // This we can see the rotation problems
-            position={[0, 0.5, 0]}
-            count={100} // Intented to be 20.000 trees
-            areaSize={[60, 60]}
-            minScale={1}
-            maxScale={2}
-            baseScale={[1, 1, 1]}
-            avoidRadius={1}
-            gridSize={8}
-            atlasSize={2048}
-            octType={0}
-            geometryArgs={[2, 2]}
-            roughness={1}
-            metalness={0}
-            alphaTest={0.6}
-            envMapIntensity={0.2}
-          /> */}
-
           {/* 🔥 NEW: WebGPU Compute-based Field with Atlas Caching */}
           {/* Uncomment to render hundreds of instances sharing a single atlas */}
           {/* Atlas is generated once and automatically cached for all instances */}
-
-          <TreeOctahedralImpostorFieldCompute
-            modelPath="/car.glb"
+          <Stats />
+          <OctahedralImpostorLODField
+            // modelPath="/car.glb"
+            modelPath="/tree.glb"
             position={[0, -2, 0]}
-            count={500} // Hundreds of instances sharing the same atlas
+            count={count} // Hundreds of instances sharing the same atlas
             areaSize={[250, 250]}
             minHeight={0}
             maxHeight={0}
-            minScale={0.8}
-            maxScale={1}
+            minScale={0.55}
+            maxScale={1.45}
+            widthVariation={0.22}
+            heightVariation={0.28}
             baseScale={[1.8, 1.8, 1.8]}
             avoidRadius={6}
             seed={2024}
+            randomYaw={false}
+            shadowGroundY={-1.2}
+            showInstanceShadows={count <= 20000}
             gridSize={16}
-            atlasSize={4096}
+            atlasSize={2048}
             octType={0} // 0 = HEMI, 1 = FULL
             geometryArgs={[4, 4]}
             roughness={1}
@@ -86,62 +94,19 @@ export default function App() {
             dilationRadius={0}
             showWireframe={false}
             directionThresholdRadians={0.0872665}
+            // LOD: swap impostors for the real instanced mesh up close
+            lodDistance={lodDistance}
+            lodHysteresis={3}
+            maxNearInstances={maxNearInstances}
           />
-
-          {/* 🔥 NEW: WebGPU Compute-based Atlas Generation */}
-          {/* Uncomment to use GPU compute shaders (faster, more efficient) */}
-          {/* 
-          <TreeOctahedralImpostorCompute
-            modelPath="/car.glb"
-            position={[-1, -1, 0]}
-            scale={[2, 2, 2]}
-            gridSize={24}
-            atlasSize={8192}
-            octType={1} // 0 = HEMI, 1 = FULL
-            geometryArgs={[3.5, 3.5]}
-            roughness={1}
-            metalness={0}
-            alphaTest={0.5}
-            envMapIntensity={1}
-            // GPU Post-Processing Options
-            usePostProcessing={true}
-            brightness={1.05} // 5% brighter
-            contrast={1.0}    // No contrast change
-          />
-          */}
-
-          {/* Original WebGL-based Atlas Generation */}
-          {/* <TreeOctahedralImpostor
-            modelPath="/car.glb"
-            position={[-3, -1, 0]}
-            scale={[2, 2, 2]}
-            gridSize={24}
-            atlasSize={8192}
-            octType={1} // 0 = HEMI, 1 = FULL
-            geometryArgs={[3.5, 3.5]}
-            roughness={1}
-            metalness={0}
-            alphaTest={0.5} // 0.5
-            envMapIntensity={1}
-          /> */}
-
-          {/* <TreeOctahedralImpostorCompute
-            modelPath="/tree.glb"
-            position={[-6, -2, 0]}
-            // scale={[3, 3, 3]}
-            gridSize={21}
-            atlasSize={4096}
-            octType={0} // 0 = HEMI, 1 = FULL
-            geometryArgs={[6, 6]}
-            directionThresholdRadians={0.01872665}
-            optimizeSize={true}
-            usePostDilatation={true}
-            dilationRadius={0}
-            envMapIntensity={1}
-          /> */}
-
-          <Gltf src="/car.glb" position={[1, -1.2, 0]} scale={[1, 1, 1]} />
-          <GridWrapper />
+          <mesh
+            receiveShadow
+            position={[0, -1.225, 0]}
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            <planeGeometry args={[320, 320]} />
+            <meshStandardMaterial color="#73766d" roughness={0.95} />
+          </mesh>
         </Suspense>
       </Canvas>
 

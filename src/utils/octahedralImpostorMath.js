@@ -3,87 +3,39 @@ import { buildOctahedralMesh } from "./octahedralHelper";
 const samplingCache = new Map();
 
 function encodeDirectionToOctUV(direction, octType) {
-  // Direction is from object to camera (normalized)
-  // viewDir = object - camera, so if camera is above, viewDir.y < 0
-  // But atlas was baked using pntOct which points from object to camera
-  // pntOct has y >= 0 in HEMI mode (upper hemisphere only)
-  // So we need to handle the mapping correctly:
-  // - When camera is above (viewDir.y < 0), we want to use top view (y = 1 in pntOct space)
-  // - When camera is below (viewDir.y > 0), we project to horizontal (y = 0 in pntOct space)
+  // `direction` points from the object toward the camera (camera - object,
+  // normalized). The atlas is baked by placing the render camera at each
+  // pntOct point and looking at the origin, so pntOct *is* this same
+  // object-to-camera direction - encode it directly, no axis flips.
 
   const x = direction.x;
   const y = direction.y;
   const z = direction.z;
 
   if (octType === 0) {
-    // HEMI mode: only use upper hemisphere (y >= 0 in pntOct space)
-    // This doubles resolution for side views (most common for trees/foliage)
-    // In HEMI mode, pntOct always has y >= 0 (upper hemisphere)
-    // So when viewDir.y < 0 (camera above), we need to map to top view
-    // When viewDir.y > 0 (camera below), we project to horizontal
-
-    // For HEMI, we need to map viewDir to pntOct space where y >= 0
-    // If viewDir.y < 0 (camera above), flip to use top view: use -viewDir
-    // If viewDir.y > 0 (camera below), project to horizontal: set y = 0
+    // HEMI mode: the atlas only stores the upper hemisphere (pntOct.y >= 0),
+    // which doubles resolution for the side views that matter for foliage.
+    // When the camera dips below the horizon (y < 0) there is no baked data,
+    // so clamp to the horizon ring instead of mirroring (which would show a
+    // wrong-handed view). X/Z are preserved exactly so azimuth stays correct.
     let mappedX = x;
-    let mappedY = y;
+    let mappedY = y < 0 ? 0 : y;
     let mappedZ = z;
 
-    if (y < 0) {
-      // Camera is above: flip to use top view (this is the upper hemisphere)
-      // Keep X and Z orientation, only flip Y to positive
-      // This preserves the horizontal orientation while using top view
-      mappedX = x; // Keep X as-is to preserve left/right orientation
-      mappedY = -y; // Now positive (top view)
-      mappedZ = z; // Keep Z as-is to preserve forward/back orientation
-    } else if (y > 0) {
-      // Camera is below: project to horizontal plane
-      mappedY = 0;
-      const len = Math.sqrt(x * x + z * z);
-      if (len > 1e-9) {
-        mappedX = x / len;
-        mappedZ = z / len;
-      } else {
-        mappedX = 0;
-        mappedZ = 1;
-      }
-    }
-    // If y == 0, use as-is (horizontal view)
-
-    // Normalize using L1 norm (sum of absolutes) to match octHemi encoding
-    const absX = Math.abs(mappedX);
-    const absY = Math.abs(mappedY);
-    const absZ = Math.abs(mappedZ);
-    const sum = absX + absY + absZ;
+    // L1-normalize (sum of absolutes) to match octHemi's encoding.
+    const sum = Math.abs(mappedX) + Math.abs(mappedY) + Math.abs(mappedZ);
 
     if (sum < 1e-9) {
       return { u: 0.5, v: 0.5 };
     }
 
-    let nx = mappedX / sum;
-    let ny = mappedY / sum;
-    let nz = mappedZ / sum;
+    const nx = mappedX / sum;
+    const ny = mappedY / sum;
+    const nz = mappedZ / sum;
 
-    // Ensure y >= 0 (should already be true after mapping, but double-check)
-    if (ny < 0) {
-      ny = 0;
-      const len = Math.sqrt(nx * nx + nz * nz);
-      if (len > 1e-9) {
-        nx /= len;
-        nz /= len;
-      }
-      const absX2 = Math.abs(nx);
-      const absZ2 = Math.abs(nz);
-      const sum2 = absX2 + absZ2;
-      if (sum2 > 1e-9) {
-        nx = nx / sum2;
-        nz = nz / sum2;
-      }
-    }
-
-    // Convert hemisphere direction to UV using inverse of octHemi
-    // octHemi encoding: x = ox - oy, z = -1 + ox + oy, y = 1 - |x| - |z|
-    // Solving for ox, oy: ox = (x + z + 1) / 2, oy = (z + 1 - x) / 2
+    // Inverse of octHemi: it builds x = ox - oy, z = -1 + ox + oy,
+    // y = 1 - |x| - |z|. Solving for the plane UV gives:
+    //   ox = (x + z + 1) / 2,  oy = (z + 1 - x) / 2
     const ox = (nx + nz + 1) / 2;
     const oy = (nz + 1 - nx) / 2;
 

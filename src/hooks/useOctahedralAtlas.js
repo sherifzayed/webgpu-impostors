@@ -377,10 +377,12 @@ async function generateAtlas({
   const originalClearColor = new THREE.Color();
   gl.getClearColor(originalClearColor);
 
-  const numCells = gridSize;
+  // (gridSize + 1) viewpoint vertices per side -> (gridSize + 1) atlas frames,
+  // matching the vertex stride used by sampling/material code.
+  const numFrames = gridSize + 1;
   // Apply atlas coverage to cell size calculation
   // Coverage < 1.0 means we use less of each cell, so we can render at higher resolution
-  const effectiveCellSize = Math.floor((atlasSize / numCells) * atlasCoverage);
+  const effectiveCellSize = Math.floor((atlasSize / numFrames) * atlasCoverage);
   const cellSize = Math.max(1, effectiveCellSize);
 
   const { pntOct } = octahedralData;
@@ -513,12 +515,11 @@ async function generateAtlas({
 
   glRenderScene.add(glRenderMesh);
 
-  // Render each cell
-  // Following original example exactly: use numCells (gridSize) for flatIdx calculation
-  for (let rowIdx = 0; rowIdx <= numCells; rowIdx++) {
-    for (let colIdx = 0; colIdx <= numCells; colIdx++) {
-      // Original uses: flatIdx = (rowIdx * numCells) + colIdx
-      const flatIdx = rowIdx * numCells + colIdx;
+  // Render each cell. Stride is numFrames (gridSize + 1) so each grid vertex
+  // maps to its own atlas cell, matching the sampling/material indexing.
+  for (let rowIdx = 0; rowIdx < numFrames; rowIdx++) {
+    for (let colIdx = 0; colIdx < numFrames; colIdx++) {
+      const flatIdx = rowIdx * numFrames + colIdx;
       if (flatIdx * 3 + 2 >= pntOct.length) continue;
 
       const px = pntOct[flatIdx * 3];
@@ -579,9 +580,8 @@ async function generateAtlas({
       cellImageData.data.set(imageData);
 
       // Calculate position in atlas
-      // Original uses: pixelX = (colIdx / numCells * renderTarget.width)
-      const pixelX = Math.floor((colIdx / numCells) * atlasSize);
-      const pixelY = Math.floor((rowIdx / numCells) * atlasSize);
+      const pixelX = Math.floor((colIdx / numFrames) * atlasSize);
+      const pixelY = Math.floor((rowIdx / numFrames) * atlasSize);
 
       // Draw cell to canvas at correct position
       ctx.putImageData(cellImageData, pixelX, pixelY);
@@ -618,8 +618,8 @@ async function generateAtlas({
     width: canvas.width,
     height: canvas.height,
     cellSize,
-    numCells: numCells + 1,
-    totalCells: (numCells + 1) * (numCells + 1),
+    numCells: numFrames,
+    totalCells: numFrames * numFrames,
   });
 
   // Debug: Check if canvas has content by sampling a pixel

@@ -16,6 +16,7 @@ import { texture } from "three/tsl";
  */
 const atlasCache = new Map();
 const pendingAtlasPromises = new Map();
+const MAX_COMPUTE_ATLAS_SIZE = 4096;
 
 /**
  * Builds a cache key for atlas generation. (English comment)
@@ -83,11 +84,12 @@ export function useOctahedralAtlasCompute({
 
   // Calculate effective atlas size (may be reduced for optimization)
   const effectiveAtlasSize = useMemo(() => {
+    const requestedSize = Math.min(atlasSize, MAX_COMPUTE_ATLAS_SIZE);
     if (optimizeSize) {
       // Reduce atlas size by 50% to save VRAM (can be adjusted)
-      return Math.max(512, Math.floor(atlasSize * 0.5));
+      return Math.max(512, Math.floor(requestedSize * 0.5));
     }
-    return atlasSize;
+    return requestedSize;
   }, [atlasSize, optimizeSize]);
 
   // Generate atlas using WebGPU compute shaders
@@ -371,10 +373,14 @@ async function generateAtlasWithCompute({
   const originalClearColor = new THREE.Color();
   gl.getClearColor(originalClearColor);
 
-  const numCells = gridSize;
+  // The octahedral grid has (gridSize + 1) viewpoint vertices per side, so the
+  // atlas stores (gridSize + 1) frames per side. The cell stride must match the
+  // vertex stride used by the sampling/material code (gridSize + 1), otherwise
+  // baked viewpoints land in the wrong cells and the view shears with elevation.
+  const numFrames = gridSize + 1;
   // Apply atlas coverage to cell size calculation
   // Coverage < 1.0 means we use less of each cell, so we can render at higher resolution
-  const effectiveCellSize = Math.floor((atlasSize / numCells) * atlasCoverage);
+  const effectiveCellSize = Math.floor((atlasSize / numFrames) * atlasCoverage);
   const cellSize = Math.max(1, effectiveCellSize);
 
   const { pntOct } = octahedralData;
@@ -399,9 +405,9 @@ async function generateAtlasWithCompute({
   let renderedCells = 0;
   const startTime = performance.now();
 
-  for (let rowIdx = 0; rowIdx <= numCells; rowIdx++) {
-    for (let colIdx = 0; colIdx <= numCells; colIdx++) {
-      const flatIdx = rowIdx * numCells + colIdx;
+  for (let rowIdx = 0; rowIdx < numFrames; rowIdx++) {
+    for (let colIdx = 0; colIdx < numFrames; colIdx++) {
+      const flatIdx = rowIdx * numFrames + colIdx;
       if (flatIdx * 3 + 2 >= pntOct.length) continue;
 
       const px = pntOct[flatIdx * 3];
@@ -422,8 +428,8 @@ async function generateAtlasWithCompute({
       gl.render(renderScene, renderCam);
 
       // 🚀 USE COMPUTE SHADER TO COPY CELL TO STORAGE TEXTURE
-      const pixelX = Math.floor((colIdx / numCells) * atlasSize);
-      const pixelY = Math.floor((rowIdx / numCells) * atlasSize);
+      const pixelX = Math.floor((colIdx / numFrames) * atlasSize);
+      const pixelY = Math.floor((rowIdx / numFrames) * atlasSize);
 
       // Create compute shader for this cell
       const cellTexture = cellRenderTarget.texture;
@@ -443,12 +449,10 @@ async function generateAtlasWithCompute({
       renderedCells++;
 
       // Progress logging
-      if (renderedCells % 50 === 0 || renderedCells === (numCells + 1) ** 2) {
+      if (renderedCells % 50 === 0 || renderedCells === numFrames ** 2) {
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
         console.log(
-          `⏳ Progress: ${renderedCells}/${
-            (numCells + 1) ** 2
-          } cells (${elapsed}s)`
+          `⏳ Progress: ${renderedCells}/${numFrames ** 2} cells (${elapsed}s)`
         );
       }
     }
@@ -503,10 +507,45 @@ async function generateAtlasWithCompute({
   // Cleanup temporary resources
   cellRenderTarget.dispose();
 
-  // Convert StorageTexture to regular texture for material use
-  // In WebGPU, StorageTexture can be used directly with texture() in TSL
-  const atlasTexture = finalTexture;
-  atlasTexture.needsUpdate = true;
+  // StorageTextures are write targets for compute shaders, not meant to be
+  // sampled repeatedly by a regular render-pass material long term: three's
+  // WebGPU backend re-initializes a StorageTexture's GPU resource on every
+  // binding validation pass instead of caching it like a normal texture,
+  // which throws "Texture already initialized" once it's bound by an actual
+  // mesh material across multiple frames. Blit the finished atlas into a
+  // plain RenderTarget texture once here, and use that for sampling instead.
+  const blitRenderTarget = new THREE.RenderTarget(atlasSize, atlasSize, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+  });
+
+  const blitMaterial = new THREE.MeshBasicNodeMaterial();
+  blitMaterial.colorNode = texture(finalTexture);
+  blitMaterial.transparent = true;
+
+  const blitScene = new THREE.Scene();
+  const blitGeometry = new THREE.PlaneGeometry(2, 2);
+  const blitMesh = new THREE.Mesh(blitGeometry, blitMaterial);
+  blitScene.add(blitMesh);
+
+  const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  blitCamera.position.set(0, 0, 1);
+  blitCamera.lookAt(0, 0, 0);
+
+  gl.setRenderTarget(blitRenderTarget);
+  gl.render(blitScene, blitCamera);
+
+  blitGeometry.dispose();
+  blitMaterial.dispose();
+  storageTexture.dispose();
+  if (finalTexture !== storageTexture) {
+    finalTexture.dispose();
+  }
+
+  const atlasTexture = blitRenderTarget.texture;
   atlasTexture.flipY = false;
   atlasTexture.minFilter = THREE.LinearFilter;
   atlasTexture.magFilter = THREE.LinearFilter;

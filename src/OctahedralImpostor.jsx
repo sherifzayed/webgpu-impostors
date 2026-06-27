@@ -111,8 +111,11 @@ export default function OctahedralImpostor({
     material.metalness = metalness;
     material.wireframe = showWireframe;
 
-    // Uniforms - FOLLOWING ORIGINAL EXAMPLE EXACTLY
-    const gridSizeUniform = uniform(float(gridSize));
+    // Uniforms - the atlas is (gridSize + 1) frames per side (one per
+    // octahedral grid vertex), and sampling returns vertex indices with that
+    // same stride, so the cell divisor must be gridSize + 1.
+    const frameCount = gridSize + 1;
+    const gridSizeUniform = uniform(float(frameCount));
     const atlasTexture = texture(atlas.texture);
 
     // Face indices and weights from raycast
@@ -151,8 +154,8 @@ export default function OctahedralImpostor({
     const rowA = flatIndexA.div(gridSizeUniform).floor();
     const colA = flatIndexA.sub(rowA.mul(gridSizeUniform));
     // Clamp to valid grid range
-    const maxRow = float(gridSize - 1);
-    const maxCol = float(gridSize - 1);
+    const maxRow = float(frameCount - 1);
+    const maxCol = float(frameCount - 1);
     const safeRowA = rowA.clamp(0.0, maxRow);
     const safeColA = colA.clamp(0.0, maxCol);
     const cellIndexA = vec2(safeColA, safeRowA);
@@ -425,11 +428,12 @@ export default function OctahedralImpostor({
     }
     lastQuaternion.current.copy(billboardRef.current.quaternion);
 
-    // Calculate direction from object to camera (matching original raycast)
-    // Original: raycaster.ray.direction.subVectors(mesh.position, camera.position)
+    // Direction from the object toward the camera (camera - object). The atlas
+    // is baked with the render camera placed at each pntOct point looking at
+    // the origin, so the lookup must use this orientation, not its negation.
     const viewDir = tempDirection
-      .copy(targetCenter)
-      .sub(camera.position)
+      .copy(camera.position)
+      .sub(targetCenter)
       .normalize();
 
     // Only skip update if direction hasn't changed significantly
