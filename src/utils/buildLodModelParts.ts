@@ -1,5 +1,88 @@
 import * as THREE from "three/webgpu";
 
+export function bakeMorphTargetsIntoGeometry(sourceMesh) {
+  const geometry = sourceMesh.geometry.clone();
+  const influences = sourceMesh.morphTargetInfluences;
+  const morphAttributes = geometry.morphAttributes;
+
+  if (!influences || !morphAttributes?.position?.length) {
+    return geometry;
+  }
+
+  const position = geometry.getAttribute("position");
+  const normal = geometry.getAttribute("normal");
+  const morphPositions = morphAttributes.position || [];
+  const morphNormals = morphAttributes.normal || [];
+  const relative = geometry.morphTargetsRelative === true;
+
+  for (let vertex = 0; vertex < position.count; vertex += 1) {
+    const baseX = position.getX(vertex);
+    const baseY = position.getY(vertex);
+    const baseZ = position.getZ(vertex);
+    let x = baseX;
+    let y = baseY;
+    let z = baseZ;
+
+    let normalBaseX = 0;
+    let normalBaseY = 0;
+    let normalBaseZ = 0;
+    let nx = 0;
+    let ny = 0;
+    let nz = 0;
+
+    if (normal) {
+      normalBaseX = normal.getX(vertex);
+      normalBaseY = normal.getY(vertex);
+      normalBaseZ = normal.getZ(vertex);
+      nx = normalBaseX;
+      ny = normalBaseY;
+      nz = normalBaseZ;
+    }
+
+    for (let target = 0; target < morphPositions.length; target += 1) {
+      const influence = influences[target] || 0;
+      if (influence === 0) continue;
+
+      const morphPosition = morphPositions[target];
+      if (relative) {
+        x += morphPosition.getX(vertex) * influence;
+        y += morphPosition.getY(vertex) * influence;
+        z += morphPosition.getZ(vertex) * influence;
+      } else {
+        x += (morphPosition.getX(vertex) - baseX) * influence;
+        y += (morphPosition.getY(vertex) - baseY) * influence;
+        z += (morphPosition.getZ(vertex) - baseZ) * influence;
+      }
+
+      const morphNormal = morphNormals[target];
+      if (normal && morphNormal) {
+        if (relative) {
+          nx += morphNormal.getX(vertex) * influence;
+          ny += morphNormal.getY(vertex) * influence;
+          nz += morphNormal.getZ(vertex) * influence;
+        } else {
+          nx += (morphNormal.getX(vertex) - normalBaseX) * influence;
+          ny += (morphNormal.getY(vertex) - normalBaseY) * influence;
+          nz += (morphNormal.getZ(vertex) - normalBaseZ) * influence;
+        }
+      }
+    }
+
+    position.setXYZ(vertex, x, y, z);
+    if (normal) {
+      normal.setXYZ(vertex, nx, ny, nz);
+    }
+  }
+
+  position.needsUpdate = true;
+  if (normal) {
+    normal.needsUpdate = true;
+  }
+
+  geometry.morphAttributes = {};
+  return geometry;
+}
+
 /**
  * Reproduces the exact model normalization the atlas baker applies in
  * useOctahedralAtlasCompute (generateAtlasWithCompute) so the real mesh used
@@ -26,7 +109,10 @@ export function buildLodModelParts(gltfScene) {
 
   gltfScene.traverse((child) => {
     if (child.isMesh && child.geometry) {
-      const mesh = new THREE.Mesh(child.geometry.clone(), child.material);
+      const mesh = new THREE.Mesh(
+        bakeMorphTargetsIntoGeometry(child),
+        child.material
+      );
       mesh.position.copy(child.position);
       mesh.quaternion.copy(child.quaternion);
       mesh.scale.copy(child.scale);

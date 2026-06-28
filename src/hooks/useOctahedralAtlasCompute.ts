@@ -9,6 +9,7 @@ import {
   createAtlasDilatationShader,
   createStorageTexture,
 } from "../utils/atlasComputeShader";
+import { bakeMorphTargetsIntoGeometry } from "../utils/buildLodModelParts";
 import { texture } from "three/tsl";
 
 /**
@@ -158,7 +159,6 @@ export function useOctahedralAtlasCompute({
         contrast,
         usePostDilatation,
         dilationRadius,
-        gridSize,
       }).then(
         (texture) => {
           const atlasPayload = {
@@ -263,7 +263,7 @@ async function generateAtlasWithCompute({
     sourceScene.traverse((child) => {
       if (child instanceof THREE.Mesh) {
         const clonedMesh = child.clone();
-        clonedMesh.geometry = child.geometry.clone();
+        clonedMesh.geometry = bakeMorphTargetsIntoGeometry(child);
         if (child.material) {
           if (Array.isArray(child.material)) {
             clonedMesh.material = child.material.map((mat) => mat.clone());

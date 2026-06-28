@@ -76,21 +76,12 @@ export default function OctahedralImpostorLODField({
   const { camera } = useThree();
   const gltf = useGLTF(modelPath);
 
-  const sourceMesh = useMemo(() => {
+  const sourceObject = useMemo(() => {
     if (!gltf?.scene) return null;
 
-    let foundMesh = null;
-    gltf.scene.traverse((child) => {
-      if (!foundMesh && child.isMesh) {
-        foundMesh = child;
-      }
-    });
+    gltf.scene.userData.__impostorSourceId = modelPath;
 
-    if (foundMesh) {
-      foundMesh.userData.__impostorSourceId = modelPath;
-    }
-
-    return foundMesh;
+    return gltf.scene;
   }, [gltf, modelPath]);
 
   const instances = useMemo(
@@ -128,11 +119,11 @@ export default function OctahedralImpostorLODField({
   );
 
   const { atlas } = useOctahedralAtlasCompute({
-    mesh: sourceMesh,
+    mesh: sourceObject,
     gridSize,
     atlasSize,
     octType,
-    enabled: !!sourceMesh,
+    enabled: !!sourceObject,
     usePostProcessing,
     brightness,
     contrast,
@@ -312,7 +303,7 @@ export default function OctahedralImpostorLODField({
     }
   });
 
-  if (!sourceMesh || instances.length === 0) {
+  if (!sourceObject || instances.length === 0) {
     return null;
   }
 

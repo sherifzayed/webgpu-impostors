@@ -73,16 +73,16 @@ export default function App() {
             baseScale={[1.8, 1.8, 1.8]}
             avoidRadius={6}
             seed={2024}
-            randomYaw={false}
+            randomYaw={true}
             shadowGroundY={-1.2}
-            showInstanceShadows={count <= 20000}
+            showInstanceShadows={false}
             gridSize={16}
-            atlasSize={2048}
+            atlasSize={512}
             octType={0} // 0 = HEMI, 1 = FULL
             geometryArgs={[4, 4]}
             roughness={1}
             metalness={0}
-            alphaTest={0.5}
+            alphaTest={0.35}
             envMapIntensity={1}
             // WebGPU Compute specific options
             usePostProcessing={true}
