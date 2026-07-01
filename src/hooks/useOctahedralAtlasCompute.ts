@@ -22,6 +22,8 @@ const MAX_COMPUTE_ATLAS_SIZE = 4096;
 /**
  * Builds a cache key for atlas generation. (English comment)
  */
+const ATLAS_CACHE_VERSION = "centered-v2";
+
 function buildAtlasCacheKey(mesh, gridSize, atlasSize, octType) {
   if (!mesh) {
     return null;
@@ -35,7 +37,7 @@ function buildAtlasCacheKey(mesh, gridSize, atlasSize, octType) {
         : THREE.MathUtils.generateUUID();
   }
 
-  return `${mesh.userData.__impostorSourceId}|g${gridSize}|a${atlasSize}|o${octType}`;
+  return `${ATLAS_CACHE_VERSION}|${mesh.userData.__impostorSourceId}|g${gridSize}|a${atlasSize}|o${octType}`;
 }
 
 /**
@@ -353,9 +355,11 @@ async function generateAtlasWithCompute({
   });
 
   const radius = boundingSphere.radius * 1.5;
-  const scaleFactor = 0.5 / radius;
+  const scaleFactor = radius > 0 ? 0.5 / radius : 1;
+  const center = boundingSphere.center.clone();
   renderMesh.scale.setScalar(scaleFactor);
-  renderMesh.position.set(0, 0, 0);
+  renderMesh.position.copy(center).multiplyScalar(-scaleFactor);
+  renderMesh.updateMatrixWorld(true);
 
   // Set up orthographic camera
   const orthoSize = 0.5;

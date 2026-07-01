@@ -145,8 +145,9 @@ export function buildLodModelParts(gltfScene) {
 
   const radius = boundingSphere.radius * 1.5;
   const scaleFactor = radius > 0 ? 0.5 / radius : 1;
+  const center = boundingSphere.center.clone();
   group.scale.setScalar(scaleFactor);
-  group.position.set(0, 0, 0);
+  group.position.copy(center).multiplyScalar(-scaleFactor);
   group.updateMatrixWorld(true);
 
   // Bake the final world matrix into each geometry so a plain InstancedMesh can
