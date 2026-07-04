@@ -61,7 +61,7 @@ export default function App() {
           <OctahedralImpostorLODField
             // modelPath="/car.glb"
             modelPath="/tree.glb"
-            position={[0, -2, 0]}
+            position={[0, 0, 0]}
             count={count} // Hundreds of instances sharing the same atlas
             areaSize={[250, 250]}
             minHeight={0}
