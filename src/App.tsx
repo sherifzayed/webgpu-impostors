@@ -15,7 +15,7 @@ import { Perf } from "r3f-webgpu-perf";
 export default function App() {
   const { count, lodDistance, maxNearInstances } = useControls({
     count: {
-      min: 100,
+      min: 5000,
       max: 50000,
       value: 500,
       step: 100,
@@ -23,14 +23,15 @@ export default function App() {
     lodDistance: {
       min: 0,
       max: 250,
-      value: 500,
+      value: 175,
     },
     maxNearInstances: {
       min: 0,
       max: 10000,
-      value: 0,
+      value: 3000,
       step: 100,
     },
+    scale: [1, 1],
   });
 
   return (
@@ -64,13 +65,13 @@ export default function App() {
           <OctahedralImpostorLODField
             // modelPath="/car.glb"
             modelPath="/tree.glb"
-            position={[0, 0, 0]}
+            position={[0, 13, 0]}
             count={count} // Hundreds of instances sharing the same atlas
-            areaSize={[250, 250]}
+            areaSize={[3000, 3000]}
             minHeight={0}
             maxHeight={0}
-            minScale={0.55}
-            maxScale={1.45}
+            minScale={4}
+            maxScale={6}
             widthVariation={0.22}
             heightVariation={0.28}
             baseScale={[1.8, 1.8, 1.8]}
@@ -78,17 +79,19 @@ export default function App() {
             seed={2024}
             randomYaw={true}
             shadowGroundY={-1.2}
-            showInstanceShadows={false}
+            showInstanceShadows={true}
+            shadowOpacity={0.45}
+            sunPosition={[35, 55, 35]} // keep in sync with SceneLight's directionalLight
             gridSize={16}
             atlasSize={4096}
             octType={0} // 0 = HEMI, 1 = FULL
             geometryArgs={[4, 4]}
             roughness={1}
             metalness={0}
-            alphaTest={0.35}
+            alphaTest={0.03}
             envMapIntensity={0}
             // WebGPU Compute specific options
-            usePostProcessing={true}
+            usePostProcessing={false}
             brightness={1.0}
             contrast={1.0}
             optimizeSize={true}
@@ -107,7 +110,7 @@ export default function App() {
             position={[0, -1.225, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
           >
-            <planeGeometry args={[320, 320]} />
+            <planeGeometry args={[3200, 3200]} />
             <meshStandardMaterial color="#73766d" roughness={0.95} />
           </mesh>
         </Suspense>

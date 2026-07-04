@@ -22,7 +22,7 @@ const MAX_COMPUTE_ATLAS_SIZE = 4096;
 /**
  * Builds a cache key for atlas generation. (English comment)
  */
-const ATLAS_CACHE_VERSION = "centered-v3-cutout";
+const ATLAS_CACHE_VERSION = "centered-v5-diffuse";
 
 function buildAtlasCacheKey(mesh, gridSize, atlasSize, octType) {
   if (!mesh) {
@@ -326,6 +326,27 @@ async function generateAtlasWithCompute({
               mat.envMap = environment;
             }
             mat.toneMapped = true;
+
+            // Force the bake to diffuse albedo. Any view-dependent reflection
+            // is meaningless in a fixed-angle octahedral atlas (the impostor
+            // samples one baked view, so a "reflection" would be frozen/wrong),
+            // and several ways of introducing one all turn foliage into a gray
+            // mirror of the environment instead of showing its leaf color:
+            //   - glTF's default metallicFactor is 1.0, so foliage that omits it
+            //     (e.g. tree3.glb's Leaf_01) loads fully metallic.
+            //   - KHR_materials_specular + KHR_materials_ior can drive dielectric
+            //     F0 to ~1 (e.g. tree.glb's Leaf: ior=1000, specularColor 0.82).
+            // Zero out metalness and every specular/reflective channel so the
+            // baked cell shows the leaf's baseColor/map, lit only by diffuse.
+            mat.metalness = 0;
+
+            if (mat.isMeshPhysicalMaterial) {
+              mat.specularIntensity = 0; // kills dielectric F0 regardless of ior
+              mat.ior = 1.5;
+              mat.clearcoat = 0;
+              mat.sheen = 0;
+              mat.transmission = 0;
+            }
           }
 
           // Alpha-textured foliage (GLTF "BLEND" materials) arrives here as

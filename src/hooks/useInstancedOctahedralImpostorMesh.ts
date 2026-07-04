@@ -150,8 +150,24 @@ export function useInstancedOctahedralImpostorMesh({
 
     const mesh = new THREE.Mesh(geometry, material);
     mesh.frustumCulled = false;
+    // Impostor billboards don't shadow-map correctly (the quad re-orients to
+    // face the shadow camera) and the depth pass over the whole field is
+    // expensive; shadows come from TreeImpostorShadowDecals instead.
     mesh.castShadow = false;
     mesh.receiveShadow = false;
+
+    // Conservative bounding-sphere radius per instance for frustum culling:
+    // half the billboard diagonal at that instance's scale. The billboard can
+    // rotate to face any direction, so the sphere must cover the worst case.
+    const [planeWidth, planeHeight] = geometryArgs;
+    const boundingRadii = new Float32Array(count);
+    for (let i = 0; i < count; i += 1) {
+      const instance = instances[i];
+      const halfW =
+        0.5 * planeWidth * Math.max(instance.scale[0], instance.scale[2]);
+      const halfH = 0.5 * planeHeight * instance.scale[1];
+      boundingRadii[i] = Math.sqrt(halfW * halfW + halfH * halfH);
+    }
 
     stateRef.current = {
       positions,
@@ -165,6 +181,15 @@ export function useInstancedOctahedralImpostorMesh({
       tempIndices: new THREE.Vector3(),
       tempWeights: new THREE.Vector3(),
       octahedralData: atlas.octahedralData,
+      boundingRadii,
+      // Visibility is the AND of two independent inputs, both packed into
+      // instanceScale.w: LOD (the field hides impostors swapped for real
+      // meshes) and frustum culling (instances outside the camera's view).
+      lodVisible: new Uint8Array(count).fill(1),
+      frustumCulled: new Uint8Array(count),
+      tempFrustum: new THREE.Frustum(),
+      tempProjScreenMatrix: new THREE.Matrix4(),
+      tempSphere: new THREE.Sphere(),
     };
 
     return mesh;
@@ -205,10 +230,17 @@ export function useInstancedOctahedralImpostorMesh({
       tempIndices,
       tempWeights,
       octahedralData,
+      boundingRadii,
+      lodVisible,
+      frustumCulled,
+      tempFrustum,
+      tempProjScreenMatrix,
+      tempSphere,
     } = stateRef.current;
     const instanceCount = positions.length / 3;
     const updatesThisFrame = Math.min(maxUpdatesPerFrame, instanceCount);
     let cursor = stateRef.current.updateCursor % instanceCount;
+    const startCursor = cursor;
 
     const faceIndicesAttr = instancedMesh.geometry.getAttribute(
       "instanceFaceIndices"
@@ -216,8 +248,16 @@ export function useInstancedOctahedralImpostorMesh({
     const faceWeightsAttr = instancedMesh.geometry.getAttribute(
       "instanceFaceWeights"
     );
+    const scaleAttr = instancedMesh.geometry.getAttribute("instanceScale");
 
     let changed = false;
+    let visibilityChanged = false;
+
+    tempProjScreenMatrix.multiplyMatrices(
+      camera.projectionMatrix,
+      camera.matrixWorldInverse
+    );
+    tempFrustum.setFromProjectionMatrix(tempProjScreenMatrix);
 
     // Static alignment offset: the baked atlas azimuth is rotated ~90° relative
     // to the sampling convention, so every impostor's default facing is turned.
@@ -231,6 +271,31 @@ export function useInstancedOctahedralImpostorMesh({
       cursor = (cursor + 1) % instanceCount;
       const positionOffset = i * 3;
       const yawOffset = i * 2;
+
+      // Frustum cull: instances behind the camera or outside the view cone
+      // are collapsed via instanceScale.w (the vertex shader shrinks them to
+      // a point, so they cost no fill) and skip the atlas-cell sampling work.
+      tempSphere.center.set(
+        positions[positionOffset],
+        positions[positionOffset + 1],
+        positions[positionOffset + 2]
+      );
+      tempSphere.radius = boundingRadii[i];
+      const inView = tempFrustum.intersectsSphere(tempSphere);
+
+      if (!inView) {
+        if (!frustumCulled[i]) {
+          frustumCulled[i] = 1;
+          scaleAttr.setW(i, 0);
+          visibilityChanged = true;
+        }
+        continue;
+      }
+      if (frustumCulled[i]) {
+        frustumCulled[i] = 0;
+        scaleAttr.setW(i, lodVisible[i]);
+        visibilityChanged = true;
+      }
 
       // Direction from the instance toward the camera. The atlas is baked
       // indexed by the camera-position direction (camera placed at pntOct,
@@ -303,10 +368,48 @@ export function useInstancedOctahedralImpostorMesh({
     stateRef.current.updateCursor = cursor;
 
     if (changed) {
+      // Only the contiguous window [startCursor, startCursor + updatesThisFrame)
+      // was touched this frame. Upload just that window (each face attribute has
+      // itemSize 3) instead of the whole buffer, so per-frame GPU transfer is
+      // O(updatesThisFrame) rather than O(instanceCount). The window can wrap
+      // past the end of the buffer, in which case it splits into two ranges.
+      if (updatesThisFrame >= instanceCount) {
+        faceIndicesAttr.addUpdateRange(0, instanceCount * 3);
+        faceWeightsAttr.addUpdateRange(0, instanceCount * 3);
+      } else {
+        const firstCount = Math.min(updatesThisFrame, instanceCount - startCursor);
+        faceIndicesAttr.addUpdateRange(startCursor * 3, firstCount * 3);
+        faceWeightsAttr.addUpdateRange(startCursor * 3, firstCount * 3);
+        const wrapCount = updatesThisFrame - firstCount;
+        if (wrapCount > 0) {
+          faceIndicesAttr.addUpdateRange(0, wrapCount * 3);
+          faceWeightsAttr.addUpdateRange(0, wrapCount * 3);
+        }
+      }
       faceIndicesAttr.needsUpdate = true;
       faceWeightsAttr.needsUpdate = true;
     }
+
+    if (visibilityChanged) {
+      scaleAttr.needsUpdate = true;
+    }
   };
 
-  return { instancedMesh, updateFrame };
+  // LOD visibility (owned by the field) and frustum culling (owned by
+  // updateFrame) share instanceScale.w; this setter records the LOD side and
+  // only writes the attribute when the instance isn't already frustum-culled.
+  const setLodVisibility = (index, visible) => {
+    if (!instancedMesh || !stateRef.current) {
+      return;
+    }
+    const { lodVisible, frustumCulled } = stateRef.current;
+    lodVisible[index] = visible ? 1 : 0;
+    if (!frustumCulled[index]) {
+      const scaleAttr = instancedMesh.geometry.getAttribute("instanceScale");
+      scaleAttr.setW(index, lodVisible[index]);
+      scaleAttr.needsUpdate = true;
+    }
+  };
+
+  return { instancedMesh, updateFrame, setLodVisibility };
 }

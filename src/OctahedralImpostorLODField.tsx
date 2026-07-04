@@ -7,7 +7,7 @@ import { generateFieldInstances } from "./utils/generateFieldInstances";
 import { buildLodModelParts } from "./utils/buildLodModelParts";
 import { useOctahedralAtlasCompute } from "./hooks/useOctahedralAtlasCompute";
 import { useInstancedOctahedralImpostorMesh } from "./hooks/useInstancedOctahedralImpostorMesh";
-import TreeInstanceShadows from "./TreeInstanceShadows";
+import TreeImpostorShadowDecals from "./TreeImpostorShadowDecals";
 
 // Unused pool slots are parked far below the field and scaled to zero so a
 // stray normal/depth read can't pick them up at the origin.
@@ -52,6 +52,8 @@ export default function OctahedralImpostorLODField({
   randomYaw = true,
   shadowGroundY = -2,
   showInstanceShadows = true,
+  shadowOpacity = 0.45,
+  sunPosition = [35, 55, 35],
   gridSize = 16,
   atlasSize = 2048,
   octType = 0,
@@ -138,20 +140,21 @@ export default function OctahedralImpostorLODField({
     [octType, gridSize]
   );
 
-  const { instancedMesh, updateFrame } = useInstancedOctahedralImpostorMesh({
-    instances,
-    atlas,
-    gridSize,
-    octType,
-    samplingCache,
-    geometryArgs,
-    atlasCoverage,
-    alphaTest,
-    useDither,
-    showWireframe,
-    directionThresholdRadians,
-    maxUpdatesPerFrame: maxImpostorUpdatesPerFrame,
-  });
+  const { instancedMesh, updateFrame, setLodVisibility } =
+    useInstancedOctahedralImpostorMesh({
+      instances,
+      atlas,
+      gridSize,
+      octType,
+      samplingCache,
+      geometryArgs,
+      atlasCoverage,
+      alphaTest,
+      useDither,
+      showWireframe,
+      directionThresholdRadians,
+      maxUpdatesPerFrame: maxImpostorUpdatesPerFrame,
+    });
 
   // Real GLTF sub-meshes, normalized into the atlas baking space so they
   // align with the impostor billboards they replace.
@@ -179,12 +182,19 @@ export default function OctahedralImpostorLODField({
         maxNearInstances
       );
       mesh.frustumCulled = false;
-      mesh.castShadow = true;
+      // Near-LOD trees rely on the same projected atlas shadow decals as the
+      // impostors (see TreeImpostorShadowDecals) - shadow-map casting on top
+      // would double-shadow them and pay for an extra depth pass.
+      mesh.castShadow = false;
       mesh.receiveShadow = true;
       for (let slot = 0; slot < maxNearInstances; slot += 1) {
         mesh.setMatrixAt(slot, PARKED_MATRIX);
       }
       mesh.instanceMatrix.needsUpdate = true;
+      // Slots are allocated compactly (see the frame loop), so only the first
+      // `activeCount` instances are ever live; keep the drawn range at that
+      // size instead of paying vertex work for every parked slot.
+      mesh.count = 0;
       return mesh;
     });
   }, [lodParts, maxNearInstances]);
@@ -199,14 +209,26 @@ export default function OctahedralImpostorLODField({
 
   // nearAssignment[dataIndex] = pool slot currently showing that instance, or -1.
   // slotOccupant[slot] = data index currently occupying that slot, or -1.
+  // Slots [0, activeCount) are always the occupied ones: releases back-fill the
+  // freed slot with the last active occupant, so the pool meshes can draw just
+  // the first activeCount instances.
   const lodState = useMemo(
     () => ({
       nearAssignment: new Int32Array(instances.length).fill(-1),
       slotOccupant: new Int32Array(maxNearInstances).fill(-1),
+      activeCount: 0,
       checkCursor: 0,
     }),
     [instances, maxNearInstances]
   );
+
+  // A fresh lodState invalidates every slot; reset the drawn range so stale
+  // matrices from the previous instance set can't linger as ghost trees.
+  useEffect(() => {
+    for (const mesh of poolMeshes) {
+      mesh.count = 0;
+    }
+  }, [poolMeshes, lodState]);
 
   // The impostor quad spans `geometryArgs` world units per atlas cell, so the
   // normalized real mesh must be scaled by geometryArgs * instanceScale to
@@ -221,10 +243,6 @@ export default function OctahedralImpostorLODField({
     }
 
     const { nearAssignment, slotOccupant } = lodState;
-    // Visibility is packed into instanceScale.w (see the impostor material).
-    const impostorScaleAttr =
-      instancedMesh?.geometry.getAttribute("instanceScale");
-    let impostorVisibilityChanged = false;
     let matricesChanged = false;
 
     const enterThresholdSq = lodDistance * lodDistance;
@@ -244,12 +262,14 @@ export default function OctahedralImpostorLODField({
       const isNear = nearAssignment[i] !== -1;
 
       if (!isNear && distSq < enterThresholdSq) {
-        const freeSlot = slotOccupant.indexOf(-1);
-        if (freeSlot === -1) {
+        if (lodState.activeCount >= maxNearInstances) {
           // Pool is full - this instance just stays an impostor for now.
           continue;
         }
 
+        // Compact allocation: the next free slot is always activeCount.
+        const freeSlot = lodState.activeCount;
+        lodState.activeCount += 1;
         slotOccupant[freeSlot] = i;
         nearAssignment[i] = freeSlot;
 
@@ -266,36 +286,46 @@ export default function OctahedralImpostorLODField({
         }
         matricesChanged = true;
 
-        if (impostorScaleAttr) {
-          impostorScaleAttr.setW(i, 0);
-          impostorVisibilityChanged = true;
-        }
+        setLodVisibility(i, false);
       } else if (isNear && distSq > leaveThresholdSq) {
         const slot = nearAssignment[i];
-        slotOccupant[slot] = -1;
-        nearAssignment[i] = -1;
+        const lastSlot = lodState.activeCount - 1;
 
-        for (const mesh of poolMeshes) {
-          mesh.setMatrixAt(slot, PARKED_MATRIX);
+        // Keep the live range dense: move the last active occupant into the
+        // freed slot, then shrink the range by one.
+        if (slot !== lastSlot) {
+          const movedIndex = slotOccupant[lastSlot];
+          const moved = instances[movedIndex];
+          tempObject.position.set(...moved.position);
+          tempObject.rotation.set(0, moved.rotationY || 0, 0);
+          tempObject.scale.set(
+            planeWidth * moved.scale[0],
+            planeHeight * moved.scale[1],
+            planeWidth * moved.scale[2]
+          );
+          tempObject.updateMatrix();
+          for (const mesh of poolMeshes) {
+            mesh.setMatrixAt(slot, tempObject.matrix);
+          }
+          slotOccupant[slot] = movedIndex;
+          nearAssignment[movedIndex] = slot;
         }
+
+        slotOccupant[lastSlot] = -1;
+        nearAssignment[i] = -1;
+        lodState.activeCount = lastSlot;
         matricesChanged = true;
 
-        if (impostorScaleAttr) {
-          impostorScaleAttr.setW(i, 1);
-          impostorVisibilityChanged = true;
-        }
+        setLodVisibility(i, true);
       }
     }
     lodState.checkCursor = checkCursor;
 
     if (matricesChanged) {
       for (const mesh of poolMeshes) {
+        mesh.count = lodState.activeCount;
         mesh.instanceMatrix.needsUpdate = true;
       }
-    }
-
-    if (impostorVisibilityChanged) {
-      impostorScaleAttr.needsUpdate = true;
     }
   });
 
@@ -306,8 +336,18 @@ export default function OctahedralImpostorLODField({
   return (
     <>
       {instancedMesh && <primitive object={instancedMesh} />}
-      {showInstanceShadows && (
-        <TreeInstanceShadows instances={instances} groundY={shadowGroundY} />
+      {showInstanceShadows && atlas && (
+        <TreeImpostorShadowDecals
+          instances={instances}
+          atlas={atlas}
+          samplingCache={samplingCache}
+          gridSize={gridSize}
+          atlasCoverage={atlasCoverage}
+          geometryArgs={geometryArgs}
+          groundY={shadowGroundY}
+          sunPosition={sunPosition}
+          opacity={shadowOpacity}
+        />
       )}
       {poolMeshes.map((mesh, partIndex) => (
         <primitive key={partIndex} object={mesh} />

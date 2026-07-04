@@ -189,7 +189,12 @@ export class InstancedOctahedralImpostorMaterial extends THREE.MeshBasicNodeMate
     const instanceScale = attribute("instanceScale", "vec4");
 
     const mvPosition = modelViewMatrix.mul(vec3(instanceOffset));
-    const alignedPosition = positionGeometry.xy.mul(instanceScale.xy);
+    // Multiplying by visibility (instanceScale.w) collapses hidden or
+    // frustum-culled instances to a degenerate point, so they rasterize no
+    // fragments instead of drawing a fully transparent quad.
+    const alignedPosition = positionGeometry.xy
+      .mul(instanceScale.xy)
+      .mul(instanceScale.w);
 
     return vec4(mvPosition.xy.add(alignedPosition), mvPosition.zw);
   }
