@@ -7,9 +7,10 @@ import TreeOctahedralImpostor from "./TreeOctahedralImpostor";
 import TreeOctahedralImpostorCompute from "./TreeOctahedralImpostorCompute"; // New: WebGPU Compute-based
 import TreeOctahedralImpostorFieldCompute from "./TreeOctahedralImpostorFieldCompute"; // New: WebGPU Compute-based field with atlas caching
 import OctahedralImpostorLODField from "./OctahedralImpostorLODField"; // New: single-draw-call field with close-up real-mesh LOD swap
-import { Gltf, Loader, OrbitControls, Stats } from "@react-three/drei";
+import { Gltf, Loader, OrbitControls } from "@react-three/drei";
 import GridWrapper from "./GridWrapper";
 import { useControls } from "leva";
+import { Perf } from "r3f-webgpu-perf";
 
 export default function App() {
   const { count, lodDistance, maxNearInstances } = useControls({
@@ -27,7 +28,7 @@ export default function App() {
     maxNearInstances: {
       min: 0,
       max: 10000,
-      value: 100,
+      value: 0,
       step: 100,
     },
   });
@@ -57,10 +58,12 @@ export default function App() {
           {/* 🔥 NEW: WebGPU Compute-based Field with Atlas Caching */}
           {/* Uncomment to render hundreds of instances sharing a single atlas */}
           {/* Atlas is generated once and automatically cached for all instances */}
-          <Stats />
+
+          <Perf />
+
           <OctahedralImpostorLODField
             // modelPath="/car.glb"
-            modelPath="/tree3.glb"
+            modelPath="/tree.glb"
             position={[0, 0, 0]}
             count={count} // Hundreds of instances sharing the same atlas
             areaSize={[250, 250]}
@@ -77,7 +80,7 @@ export default function App() {
             shadowGroundY={-1.2}
             showInstanceShadows={false}
             gridSize={16}
-            atlasSize={512}
+            atlasSize={4096}
             octType={0} // 0 = HEMI, 1 = FULL
             geometryArgs={[4, 4]}
             roughness={1}

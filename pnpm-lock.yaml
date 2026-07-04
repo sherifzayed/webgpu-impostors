@@ -29,6 +29,9 @@ importers:
       maath:
         specifier: 0.10.8
         version: 0.10.8(@types/three@0.184.0)(three@0.184.0)
+      r3f-webgpu-perf:
+        specifier: ^0.1.4
+        version: 0.1.4(@react-three/fiber@9.3.0(@types/react@19.2.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(three@0.184.0))(@types/react@19.2.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(three@0.184.0)
       react:
         specifier: 19.1.1
         version: 19.1.1
@@ -1998,6 +2001,14 @@ packages:
 
   queue-microtask@1.2.3:
     resolution: {integrity: sha512-NuaNSa6flKT5JaSYQzJok04JzTL1CA6aGhv5rfLW3PgqA+M2ChpZQnAC8h8i4ZFkBS8X5RqkDBHA7r4hej3K9A==}
+
+  r3f-webgpu-perf@0.1.4:
+    resolution: {integrity: sha512-Zp76mjw2lGslrFaqQ6N3WRjkFsMkH1XGcxI+pDX5EMedvfVnXvYicn6jJGk2rsEidHWdY2XJfwpBpfGJrqXBNg==}
+    peerDependencies:
+      '@react-three/fiber': '>=8.0'
+      react: '>=18.0'
+      react-dom: '>=18.0'
+      three: '>=0.150.0'
 
   raw-body@2.4.1:
     resolution: {integrity: sha512-9WmIKF6mkvA0SLmA2Knm9+qj89e+j1zqgyn8aXGd7+nAduPoqgI9lO57SAZNn/Byzo5P7JhXTyg9PzaJbH73bA==}
@@ -4392,6 +4403,16 @@ snapshots:
       is-buffer: 1.1.6
 
   queue-microtask@1.2.3: {}
+
+  r3f-webgpu-perf@0.1.4(@react-three/fiber@9.3.0(@types/react@19.2.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(three@0.184.0))(@types/react@19.2.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(three@0.184.0):
+    dependencies:
+      '@react-three/fiber': 9.3.0(@types/react@19.2.17)(react-dom@19.1.1(react@19.1.1))(react@19.1.1)(three@0.184.0)
+      react: 19.1.1
+      react-dom: 19.1.1(react@19.1.1)
+      three: 0.184.0
+      valtio: 2.3.0(@types/react@19.2.17)(react@19.1.1)
+    transitivePeerDependencies:
+      - '@types/react'
 
   raw-body@2.4.1:
     dependencies:
