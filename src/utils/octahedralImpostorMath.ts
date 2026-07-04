@@ -2,7 +2,11 @@ import { buildOctahedralMesh } from "./octahedralHelper";
 
 const samplingCache = new Map();
 
-function encodeDirectionToOctUV(direction, octType) {
+// Reused across every sampleOctahedralDirection call so the per-frame hot path
+// (up to tens of thousands of calls) allocates nothing and never triggers GC.
+const _scratchUV = { u: 0, v: 0 };
+
+function encodeDirectionToOctUV(direction, octType, out) {
   // `direction` points from the object toward the camera (camera - object,
   // normalized). The atlas is baked by placing the render camera at each
   // pntOct point and looking at the origin, so pntOct *is* this same
@@ -26,7 +30,9 @@ function encodeDirectionToOctUV(direction, octType) {
     const sum = Math.abs(mappedX) + Math.abs(mappedY) + Math.abs(mappedZ);
 
     if (sum < 1e-9) {
-      return { u: 0.5, v: 0.5 };
+      out.u = 0.5;
+      out.v = 0.5;
+      return out;
     }
 
     const nx = mappedX / sum;
@@ -39,10 +45,9 @@ function encodeDirectionToOctUV(direction, octType) {
     const ox = (nx + nz + 1) / 2;
     const oy = (nz + 1 - nx) / 2;
 
-    return {
-      u: Math.max(0, Math.min(1, ox)),
-      v: Math.max(0, Math.min(1, oy)),
-    };
+    out.u = Math.max(0, Math.min(1, ox));
+    out.v = Math.max(0, Math.min(1, oy));
+    return out;
   } else {
     // FULL mode: standard octahedral encoding (both hemispheres)
     // Use L1 normalization to match octFull encoding
@@ -52,7 +57,9 @@ function encodeDirectionToOctUV(direction, octType) {
     const sum = absX + absY + absZ;
 
     if (sum < 1e-9) {
-      return { u: 0.5, v: 0.5 };
+      out.u = 0.5;
+      out.v = 0.5;
+      return out;
     }
 
     let nx = x / sum;
@@ -70,10 +77,9 @@ function encodeDirectionToOctUV(direction, octType) {
     }
 
     // Convert to UV: map [-1, 1] to [0, 1]
-    return {
-      u: nx * 0.5 + 0.5,
-      v: nz * 0.5 + 0.5,
-    };
+    out.u = nx * 0.5 + 0.5;
+    out.v = nz * 0.5 + 0.5;
+    return out;
   }
 }
 
@@ -227,16 +233,17 @@ export function sampleOctahedralDirection({
     return false;
   }
 
-  // Ensure direction is normalized
-  const normalizedDir = direction.clone().normalize();
-  if (normalizedDir.length() < 0.1) {
+  // Ensure direction is normalized. Normalize in place (the caller passes a
+  // scratch vector) so the hot path allocates nothing.
+  if (direction.lengthSq() < 0.01) {
     console.warn(
       "sampleOctahedralDirection: Direction too small after normalization"
     );
     return false;
   }
+  direction.normalize();
 
-  const uv = encodeDirectionToOctUV(normalizedDir, cache.octType);
+  const uv = encodeDirectionToOctUV(direction, cache.octType, _scratchUV);
 
   // Validate UV coordinates
   if (
@@ -286,15 +293,13 @@ export function sampleOctahedralDirection({
 
   computeBarycentric2D(localU, localV, triangle.uv, weightsTarget);
 
-  // Validate indices before setting
+  // Validate/clamp indices inline (no array allocation on the hot path).
   const maxIndex = (gridSize + 1) * (gridSize + 1) - 1;
-  const validIndices = [
+  indicesTarget.set(
     Math.max(0, Math.min(triangle.indices[0], maxIndex)),
     Math.max(0, Math.min(triangle.indices[1], maxIndex)),
-    Math.max(0, Math.min(triangle.indices[2], maxIndex)),
-  ];
-
-  indicesTarget.set(validIndices[0], validIndices[1], validIndices[2]);
+    Math.max(0, Math.min(triangle.indices[2], maxIndex))
+  );
 
   return true;
 }
