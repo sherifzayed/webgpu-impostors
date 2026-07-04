@@ -46,7 +46,7 @@ export function useOctahedralAtlas({
   const [atlas, setAtlas] = useState(null);
   const [error, setError] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const environment = useEnvironment({ preset: "city" });
+  const environment = useEnvironment({ files: "/potsdamer_platz_1k.hdr" });
   const octahedralDataRef = useRef(null);
 
   // Get model path from mesh userData (same way drei stores it)

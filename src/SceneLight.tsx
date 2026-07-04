@@ -21,7 +21,7 @@ export default function SceneLight() {
       />
 
       <Suspense fallback={null}>
-        <Environment preset="city" />
+        <Environment files={"/potsdamer_platz_1k.hdr"} />
       </Suspense>
     </>
   );
