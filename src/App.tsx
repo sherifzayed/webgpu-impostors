@@ -16,19 +16,19 @@ export default function App() {
     count: {
       min: 100,
       max: 50000,
-      value: 1000,
+      value: 500,
       step: 100,
     },
     lodDistance: {
       min: 0,
-      max: 80,
-      value: 15,
+      max: 250,
+      value: 500,
     },
     maxNearInstances: {
-      min: 1,
-      max: 1000,
+      min: 0,
+      max: 10000,
       value: 100,
-      step: 10,
+      step: 100,
     },
   });
 
@@ -38,7 +38,7 @@ export default function App() {
         gl={async (props) => {
           extend(THREE);
           const renderer = new THREE.WebGPURenderer(props);
-          renderer.shadowMap.enabled = false;
+          renderer.shadowMap.enabled = true;
           renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
           await renderer.init();
@@ -60,7 +60,7 @@ export default function App() {
           <Stats />
           <OctahedralImpostorLODField
             // modelPath="/car.glb"
-            modelPath="/tree.glb"
+            modelPath="/tree3.glb"
             position={[0, 0, 0]}
             count={count} // Hundreds of instances sharing the same atlas
             areaSize={[250, 250]}
@@ -83,7 +83,7 @@ export default function App() {
             roughness={1}
             metalness={0}
             alphaTest={0.35}
-            envMapIntensity={1}
+            envMapIntensity={0}
             // WebGPU Compute specific options
             usePostProcessing={true}
             brightness={1.0}

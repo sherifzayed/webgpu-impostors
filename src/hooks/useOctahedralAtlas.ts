@@ -98,7 +98,7 @@ export function useOctahedralAtlas({
       mesh,
       gridSize,
       effectiveAtlasSize,
-      octType
+      octType,
     );
 
     if (cacheKey && atlasCache.has(cacheKey)) {
@@ -163,7 +163,7 @@ export function useOctahedralAtlas({
           setError(err);
           setIsGenerating(false);
           throw err;
-        }
+        },
       );
 
       if (cacheKey) {
@@ -249,7 +249,7 @@ async function generateAtlas({
         console.log(
           `Atlas generation: Cloning mesh ${meshCount}: ${
             child.name || "unnamed"
-          }`
+          }`,
         );
       }
     });
@@ -261,7 +261,7 @@ async function generateAtlas({
   console.log(
     `Atlas generation: Cloned ${meshCount} meshes from ${
       gltfScene ? "gltfScene" : "mesh"
-    }`
+    }`,
   );
 
   // Create isolated scene for offscreen rendering
@@ -279,7 +279,7 @@ async function generateAtlas({
     console.log("Atlas generation: Using environment map from main scene");
   } else {
     console.warn(
-      "Atlas generation: No environment map found in main scene. Environment may still be loading."
+      "Atlas generation: No environment map found in main scene. Environment may still be loading.",
     );
   }
 
@@ -338,8 +338,10 @@ async function generateAtlas({
     }
   });
   console.log(
-    `Atlas generation: Processed ${processedMeshCount} meshes for centering`
+    `Atlas generation: Processed ${processedMeshCount} meshes for centering`,
   );
+
+  renderMesh.updateMatrixWorld(true);
 
   // Compute bounding sphere after centering
   const boundingSphere = new THREE.Sphere();
@@ -369,7 +371,7 @@ async function generateAtlas({
     orthoSize,
     -orthoSize,
     0.001,
-    100
+    100,
   );
 
   // Save original render state
@@ -463,7 +465,7 @@ async function generateAtlas({
     orthoSize,
     -orthoSize,
     0.001,
-    100
+    100,
   );
 
   // Clone mesh once for WebGL rendering using deep clone
@@ -561,7 +563,7 @@ async function generateAtlas({
             cellSize,
             glContext.RGBA,
             glContext.UNSIGNED_BYTE,
-            pixels
+            pixels,
           );
           imageData = pixels;
         } else {
@@ -629,10 +631,10 @@ async function generateAtlas({
       0,
       0,
       Math.min(100, canvas.width),
-      Math.min(100, canvas.height)
+      Math.min(100, canvas.height),
     );
     const hasContent = testImageData.data.some(
-      (val, idx) => idx % 4 === 3 && val > 0
+      (val, idx) => idx % 4 === 3 && val > 0,
     ); // Check alpha channel
     console.log("Atlas has content:", hasContent);
     if (!hasContent) {

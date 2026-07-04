@@ -55,6 +55,9 @@ export class InstancedOctahedralImpostorMaterial extends THREE.MeshBasicNodeMate
 
     const faceIndices = attribute("instanceFaceIndices", "vec3");
     const faceWeights = attribute("instanceFaceWeights", "vec3");
+    // LOD visibility is packed into instanceScale.w to stay under WebGPU's
+    // 8-vertex-buffer limit (see useInstancedOctahedralImpostorMesh).
+    const visibility = attribute("instanceScale", "vec4").w;
     const yawSinCos = attribute("instanceYawSinCos", "vec2");
 
     const vUv = uv();
@@ -123,8 +126,15 @@ export class InstancedOctahedralImpostorMaterial extends THREE.MeshBasicNodeMate
     const clampedUv = vec2(scaledUv.x.clamp(0.0, 1.0), scaledUv.y.clamp(0.0, 1.0));
 
     const epsilon = float(0.0001);
+    // Mirror the sampled frame horizontally (flip u within the cell). Without
+    // this, the displayed frame is left-right flipped relative to the viewpoint
+    // it was selected for, so its effective view azimuth reads as -phi instead
+    // of +phi and the impostor appears to spin at ~2x the camera as you orbit
+    // horizontally. This single flip cancels that stray mirror; it only touches
+    // the horizontal (azimuth) axis, so elevation is unaffected.
+    const flippedClampedX = float(1.0).sub(clampedUv.x);
     const safeUv = vec2(
-      clampedUv.x.mul(float(1.0).sub(epsilon.mul(2.0))).add(epsilon),
+      flippedClampedX.mul(float(1.0).sub(epsilon.mul(2.0))).add(epsilon),
       clampedUv.y.mul(float(1.0).sub(epsilon.mul(2.0))).add(epsilon)
     );
 
@@ -169,14 +179,14 @@ export class InstancedOctahedralImpostorMaterial extends THREE.MeshBasicNodeMate
       .add(float(1.0).sub(useDitherUniform).mul(cutAlpha));
 
     this.colorNode = finalColor;
-    this.opacityNode = showWireframe ? float(1.0) : processedAlpha;
-    this.alphaTest = useDither ? 0.0 : alphaTest;
+    this.opacityNode = showWireframe ? visibility : processedAlpha.mul(visibility);
+    this.alphaTest = useDither ? 0.001 : alphaTest;
     this.toneMapped = true;
   }
 
   setupPositionView(/* builder */) {
     const instanceOffset = attribute("instanceOffset", "vec3");
-    const instanceScale = attribute("instanceScale", "vec3");
+    const instanceScale = attribute("instanceScale", "vec4");
 
     const mvPosition = modelViewMatrix.mul(vec3(instanceOffset));
     const alignedPosition = positionGeometry.xy.mul(instanceScale.xy);

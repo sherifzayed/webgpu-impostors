@@ -3,6 +3,11 @@ import * as THREE from "three/webgpu";
 import { sampleOctahedralDirection } from "../utils/octahedralImpostorMath";
 import { InstancedOctahedralImpostorMaterial } from "../utils/InstancedOctahedralImpostorMaterial";
 
+// Constant yaw applied to the sampling direction to correct the fixed alignment
+// offset between the baked atlas azimuth and the sampling convention. Negative =
+// clockwise seen from above. Adjust in 90° (Math.PI / 2) steps if needed.
+const ALIGNMENT_OFFSET_RADIANS = -Math.PI / 2;
+
 /**
  * Builds a single InstancedMesh + single shared material for a whole field
  * of octahedral impostors (one draw call instead of one mesh per instance).
@@ -42,10 +47,23 @@ export function useInstancedOctahedralImpostorMesh({
 
     const count = instances.length;
 
-    const geometry = new THREE.PlaneGeometry(...geometryArgs);
+    // WebGPU allows at most 8 vertex buffers per pipeline. A THREE.InstancedMesh
+    // would spend one of those on its built-in instanceMatrix (unused here - the
+    // billboard is positioned from instanceOffset, not a per-instance matrix),
+    // and PlaneGeometry's normal is dead weight for this unlit view-shaded
+    // material. Both are dropped by building a plain InstancedBufferGeometry with
+    // only position + uv and rendering it with a regular Mesh, leaving room for
+    // the 5 per-instance attributes below. LOD visibility is additionally packed
+    // into instanceScale.w to keep the per-instance buffer count at 5.
+    const baseGeometry = new THREE.PlaneGeometry(...geometryArgs);
+    const geometry = new THREE.InstancedBufferGeometry();
+    geometry.index = baseGeometry.index;
+    geometry.setAttribute("position", baseGeometry.getAttribute("position"));
+    geometry.setAttribute("uv", baseGeometry.getAttribute("uv"));
+    geometry.instanceCount = count;
 
     const instanceOffset = new Float32Array(count * 3);
-    const instanceScale = new Float32Array(count * 3);
+    const instanceScale = new Float32Array(count * 4);
     const instanceYawSinCos = new Float32Array(count * 2);
     const instanceFaceIndices = new Float32Array(count * 3);
     const instanceFaceWeights = new Float32Array(count * 3);
@@ -82,9 +100,10 @@ export function useInstancedOctahedralImpostorMesh({
       instanceOffset[i * 3 + 1] = instance.position[1];
       instanceOffset[i * 3 + 2] = instance.position[2];
 
-      instanceScale[i * 3] = instance.scale[0];
-      instanceScale[i * 3 + 1] = instance.scale[1];
-      instanceScale[i * 3 + 2] = instance.scale[2];
+      instanceScale[i * 4] = instance.scale[0];
+      instanceScale[i * 4 + 1] = instance.scale[1];
+      instanceScale[i * 4 + 2] = instance.scale[2];
+      instanceScale[i * 4 + 3] = 1; // .w = visibility (1 = shown, 0 = hidden)
 
       instanceYawSinCos[i * 2] = sinYaw;
       instanceYawSinCos[i * 2 + 1] = cosYaw;
@@ -104,7 +123,7 @@ export function useInstancedOctahedralImpostorMesh({
     );
     geometry.setAttribute(
       "instanceScale",
-      new THREE.InstancedBufferAttribute(instanceScale, 3)
+      new THREE.InstancedBufferAttribute(instanceScale, 4)
     );
     geometry.setAttribute(
       "instanceYawSinCos",
@@ -129,9 +148,9 @@ export function useInstancedOctahedralImpostorMesh({
       showWireframe,
     });
 
-    const mesh = new THREE.InstancedMesh(geometry, material, count);
+    const mesh = new THREE.Mesh(geometry, material);
     mesh.frustumCulled = false;
-    mesh.castShadow = true;
+    mesh.castShadow = false;
     mesh.receiveShadow = false;
 
     stateRef.current = {
@@ -200,6 +219,13 @@ export function useInstancedOctahedralImpostorMesh({
 
     let changed = false;
 
+    // Static alignment offset: the baked atlas azimuth is rotated ~90° relative
+    // to the sampling convention, so every impostor's default facing is turned.
+    // Rotate the sampling direction by this constant yaw to line the impostor up
+    // with the real mesh. Flip the sign if it aligns the wrong way.
+    const alignCos = Math.cos(ALIGNMENT_OFFSET_RADIANS);
+    const alignSin = Math.sin(ALIGNMENT_OFFSET_RADIANS);
+
     for (let updated = 0; updated < updatesThisFrame; updated += 1) {
       const i = cursor;
       cursor = (cursor + 1) % instanceCount;
@@ -223,6 +249,14 @@ export function useInstancedOctahedralImpostorMesh({
         viewDir.y,
         viewDir.x * sinYaw + viewDir.z * cosYaw
       );
+
+      // Apply the constant alignment offset (horizontal only).
+      const alignedX =
+        tempLocalDirection.x * alignCos - tempLocalDirection.z * alignSin;
+      const alignedZ =
+        tempLocalDirection.x * alignSin + tempLocalDirection.z * alignCos;
+      tempLocalDirection.x = alignedX;
+      tempLocalDirection.z = alignedZ;
 
       const lastOffset = i * 3;
       if (

@@ -22,7 +22,7 @@ const MAX_COMPUTE_ATLAS_SIZE = 4096;
 /**
  * Builds a cache key for atlas generation. (English comment)
  */
-const ATLAS_CACHE_VERSION = "centered-v2";
+const ATLAS_CACHE_VERSION = "centered-v3-cutout";
 
 function buildAtlasCacheKey(mesh, gridSize, atlasSize, octType) {
   if (!mesh) {
@@ -63,7 +63,7 @@ export function useOctahedralAtlasCompute({
   const [atlas, setAtlas] = useState(null);
   const [error, setError] = useState(null);
   const [isGenerating, setIsGenerating] = useState(false);
-  const environment = useEnvironment({ preset: "city" });
+  const environment = useEnvironment({ files: "/potsdamer_platz_1k.hdr" });
   const octahedralDataRef = useRef(null);
 
   // Get model path from mesh userData (same way drei stores it)
@@ -319,13 +319,30 @@ async function generateAtlasWithCompute({
           ? node.material
           : [node.material];
         materials.forEach((mat) => {
-          if (mat && mat.isMeshStandardMaterial) {
+          if (!mat) return;
+
+          if (mat.isMeshStandardMaterial) {
             if (environment) {
               mat.envMap = environment;
             }
             mat.toneMapped = true;
-            mat.needsUpdate = true;
           }
+
+          // Alpha-textured foliage (GLTF "BLEND" materials) arrives here as
+          // transparent. Rendering it blended against the transparent cell
+          // background premultiplies its RGB by alpha; the impostor then blends
+          // again at draw time, squaring the alpha and producing dark, fringed
+          // leaves. Bake it as a hard alpha cutout instead so the atlas stores
+          // un-premultiplied leaf color plus a clean coverage mask.
+          if (mat.transparent) {
+            mat.transparent = false;
+            mat.depthWrite = true;
+            if (!(mat.alphaTest > 0)) {
+              mat.alphaTest = 0.5;
+            }
+          }
+
+          mat.needsUpdate = true;
         });
       }
 
@@ -340,6 +357,15 @@ async function generateAtlasWithCompute({
   });
 
   console.log(`✓ Processed ${processedMeshCount} meshes for centering`);
+
+  // Refresh world matrices so the combined bounding sphere below reflects the
+  // per-mesh recentering we just applied (node.position was mutated). Without
+  // this the sphere is measured from the STALE pre-recenter world matrices, so
+  // for models whose geometry is authored far from the origin (e.g. tree.glb,
+  // whose vertices sit near x=-68 with a compensating +68 node translation) the
+  // atlas camera frames empty space and bakes a blank/clipped atlas. Mirrors
+  // buildLodModelParts, which already updates matrices before measuring.
+  renderMesh.updateMatrixWorld(true);
 
   // Compute bounding sphere and scale
   const boundingSphere = new THREE.Sphere();

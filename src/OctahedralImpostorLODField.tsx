@@ -221,9 +221,10 @@ export default function OctahedralImpostorLODField({
     }
 
     const { nearAssignment, slotOccupant } = lodState;
+    // Visibility is packed into instanceScale.w (see the impostor material).
     const impostorScaleAttr =
       instancedMesh?.geometry.getAttribute("instanceScale");
-    let impostorScaleChanged = false;
+    let impostorVisibilityChanged = false;
     let matricesChanged = false;
 
     const enterThresholdSq = lodDistance * lodDistance;
@@ -266,8 +267,8 @@ export default function OctahedralImpostorLODField({
         matricesChanged = true;
 
         if (impostorScaleAttr) {
-          impostorScaleAttr.setXYZ(i, 0, 0, 0);
-          impostorScaleChanged = true;
+          impostorScaleAttr.setW(i, 0);
+          impostorVisibilityChanged = true;
         }
       } else if (isNear && distSq > leaveThresholdSq) {
         const slot = nearAssignment[i];
@@ -280,13 +281,8 @@ export default function OctahedralImpostorLODField({
         matricesChanged = true;
 
         if (impostorScaleAttr) {
-          impostorScaleAttr.setXYZ(
-            i,
-            instance.scale[0],
-            instance.scale[1],
-            instance.scale[2]
-          );
-          impostorScaleChanged = true;
+          impostorScaleAttr.setW(i, 1);
+          impostorVisibilityChanged = true;
         }
       }
     }
@@ -298,7 +294,7 @@ export default function OctahedralImpostorLODField({
       }
     }
 
-    if (impostorScaleChanged) {
+    if (impostorVisibilityChanged) {
       impostorScaleAttr.needsUpdate = true;
     }
   });
