@@ -159,3 +159,53 @@ export function buildLodModelParts(gltfScene) {
     return { geometry, material: mesh.material };
   });
 }
+
+/**
+ * The atlas baker's normalization of `object`, expressed in the object's own
+ * model space (ancestor transforms dropped, like the baker): the bounding-
+ * sphere `center` the billboard is centred on, and `scaleFactor`, the model →
+ * bake-space scale (one bake-space unit is the full billboard quad).
+ *
+ * A model placed in the world with origin `p`, yaw `θ` and uniform scale `s`
+ * therefore shows as a billboard of side `s / scaleFactor` centred at
+ * `p + Ry(θ) · center · s`.
+ */
+export function computeBakeNormalization(object) {
+  const sphere = new THREE.Sphere();
+  object.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    const geometry = bakeMorphTargetsIntoGeometry(child);
+    geometry.computeBoundingSphere();
+    if (!geometry.boundingSphere) return;
+    child.updateMatrix();
+    const part = geometry.boundingSphere.clone().applyMatrix4(child === object ? new THREE.Matrix4() : child.matrix);
+    sphere.union(part);
+  });
+  const radius = sphere.radius * 1.5;
+  return {
+    center: sphere.center.clone(),
+    scaleFactor: radius > 0 ? 0.5 / radius : 1,
+  };
+}
+
+/**
+ * Near-LOD parts in the model's own space (each sub-mesh's local transform
+ * baked in, ancestors dropped like the baker), so a pooled InstancedMesh can
+ * place them with the same origin/yaw/scale matrix as the real placement.
+ * Unlike buildLodModelParts, geometry keeps its authored normals and
+ * attributes, so materials that read positionGeometry (e.g. crown gradients)
+ * still see the units they were written for.
+ */
+export function buildLocalModelParts(object) {
+  const parts = [];
+  object.traverse((child) => {
+    if (!child.isMesh || !child.geometry) return;
+    const geometry = bakeMorphTargetsIntoGeometry(child);
+    if (child !== object) {
+      child.updateMatrix();
+      geometry.applyMatrix4(child.matrix);
+    }
+    parts.push({ geometry, material: child.material });
+  });
+  return parts;
+}

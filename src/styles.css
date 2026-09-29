@@ -25,3 +25,36 @@ canvas {
   top: 0;
   left: 0;
 }
+
+.tree-mode-bar {
+  position: absolute;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 10px;
+  background: rgba(20, 20, 20, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 10;
+}
+
+.tree-mode-bar button {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: #ddd;
+  font: 500 14px system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.tree-mode-bar button:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.tree-mode-bar button.active {
+  background: #fff;
+  color: #111;
+}
