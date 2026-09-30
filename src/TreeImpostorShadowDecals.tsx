@@ -137,9 +137,12 @@ export default function TreeImpostorShadowDecals({
       // The impostor quad is centered on instance.position, so the visible
       // treetop sits half a quad above it; shadow length follows from the
       // height of that top edge above the ground plane.
+      // On terrain, a placement carries the trunk-base height under this
+      // instance; the flat `groundY` is the fallback for planar fields.
+      const baseY = instance.placement?.position[1] ?? groundY;
       const halfHeight = (planeHeight * instance.scale[1]) / 2;
       const heightAboveGround = Math.max(
-        instance.position[1] + halfHeight - groundY,
+        instance.position[1] + halfHeight - baseY,
         0.5
       );
       const length = heightAboveGround * stretch;
@@ -148,7 +151,7 @@ export default function TreeImpostorShadowDecals({
 
       tempObject.position.set(
         instance.position[0] + shadowDirX * length * 0.5,
-        groundY + 0.05,
+        baseY + 0.05,
         instance.position[2] + shadowDirZ * length * 0.5
       );
       tempObject.rotation.set(-Math.PI / 2, quadYaw, 0);

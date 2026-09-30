@@ -6,6 +6,10 @@ import {
   treeSeed,
   type TreeVariant,
 } from "./vegetationKit";
+import { sunDirection } from "./Sun";
+
+// Must match the <Sun azimuth/elevation> in App.tsx; decals only use the direction.
+const SUN_POSITION = sunDirection(150, 34).toArray() as [number, number, number];
 
 type ImpostorTreesProps = {
   variants: TreeVariant[];
@@ -15,6 +19,7 @@ type ImpostorTreesProps = {
   atlasSize: number;
   /** Multiplier on the baked atlas colour, to match the impostors to the real meshes' lighting. */
   exposure: number;
+  decalShadows?: boolean;
 };
 
 /**
@@ -29,6 +34,7 @@ export function ImpostorTrees({
   maxNearInstances,
   atlasSize,
   exposure,
+  decalShadows = true,
 }: ImpostorTreesProps) {
   const fieldPlacements = useMemo(
     () =>
@@ -69,7 +75,8 @@ export function ImpostorTrees({
               gridSize={16}
               octType={0}
               alphaTest={0.5}
-              showInstanceShadows={false}
+              showInstanceShadows={decalShadows}
+              sunPosition={SUN_POSITION}
               maxNearInstances={maxNearInstances}
             />
           ),

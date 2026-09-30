@@ -20,6 +20,7 @@ type ImpostorControls = {
   exposure: number;
   maxNearInstances: number;
   showShadowCasters: boolean;
+  decalShadows: boolean;
 };
 
 type GroundControls = {
@@ -39,6 +40,7 @@ function useImpostorControls(): ImpostorControls {
   const lod = useControls("LOD & shadows", {
     maxNearInstances: { value: 0, min: 0, max: 2000, step: 50 },
     showShadowCasters: { value: false, label: "show shadow casters" },
+    decalShadows: { value: false, label: "decal shadows" },
   });
 
   return { ...surface, ...lod } as ImpostorControls;
@@ -83,6 +85,7 @@ function HudsonScene({ controls, ground }: { controls: ImpostorControls; ground:
         maxNearInstances={maxNearInstances}
         atlasSize={atlasSize}
         exposure={exposure}
+        decalShadows={controls.decalShadows}
       />
     </>
   );
