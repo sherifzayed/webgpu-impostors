@@ -5,12 +5,17 @@ import { buildOctahedralMesh, OCT_TYPE } from "../utils/octahedralHelper";
 import { useEnvironment, useGLTF } from "@react-three/drei";
 import {
   createAtlasCopyComputeShader,
-  createAtlasPostProcessShader,
-  createAtlasDilatationShader,
   createStorageTexture,
 } from "../utils/atlasComputeShader";
 import { bakeMorphTargetsIntoGeometry } from "../utils/buildLodModelParts";
-import { texture } from "three/tsl";
+import {
+  float,
+  normalize,
+  normalView,
+  positionView,
+  texture,
+  vec4,
+} from "three/tsl";
 
 /**
  * Cache storage shared across impostor instances. (English comment)
@@ -22,7 +27,7 @@ const MAX_COMPUTE_ATLAS_SIZE = 4096;
 /**
  * Builds a cache key for atlas generation. (English comment)
  */
-const ATLAS_CACHE_VERSION = "centered-v5-diffuse";
+const ATLAS_CACHE_VERSION = "centered-v8-premultiplied-surface";
 
 function buildAtlasCacheKey(mesh, gridSize, atlasSize, octType) {
   if (!mesh) {
@@ -43,21 +48,34 @@ function buildAtlasCacheKey(mesh, gridSize, atlasSize, octType) {
 /**
  * Hook to generate octahedral impostor atlas using WebGPU compute shaders.
  * This version uses StorageTexture for direct GPU-based atlas generation.
- * Comments in English per project guidelines.
+ *
+ * `mesh.userData.__impostorSourceId` doubles as a model path: the whole GLTF
+ * at that path is baked (callers pass one mesh found inside it). Callers that
+ * already hold the object to bake should use useOctahedralAtlasComputeFromObject.
  */
-export function useOctahedralAtlasCompute({
-  mesh = null,
+export function useOctahedralAtlasCompute(options) {
+  const modelPath = options.mesh?.userData?.__impostorSourceId || null;
+  const gltfScene = useGLTF(modelPath || "/dummy.glb");
+  return useOctahedralAtlasComputeFromObject({
+    ...options,
+    source: modelPath ? gltfScene?.scene : options.mesh,
+  });
+}
+
+/**
+ * Bakes `source` (any Object3D; every Mesh under it is included) into an
+ * octahedral atlas. `mesh` is only the cache identity: its
+ * `userData.__impostorSourceId` keys the shared atlas cache, and defaults to
+ * `source` when omitted.
+ *
+ */
+export function useOctahedralAtlasComputeFromObject({
+  source = null,
+  mesh = source,
   gridSize = 16,
   atlasSize = 2048,
   octType = OCT_TYPE.HEMI,
   enabled = true,
-  usePostProcessing = true, // Enable GPU post-processing
-  brightness = 1.0,
-  contrast = 1.0,
-  optimizeSize = false, // Reduce resolution of non-critical textures to save VRAM
-  atlasCoverage = 1.0, // How much of each atlas tile the geometry takes up (0-1)
-  usePostDilatation = false, // Expand textures to avoid bleeding between atlas cells
-  dilationRadius = 1, // Number of pixels to expand
 }) {
   const { gl, scene, camera } = useThree();
   const [atlas, setAtlas] = useState(null);
@@ -65,12 +83,6 @@ export function useOctahedralAtlasCompute({
   const [isGenerating, setIsGenerating] = useState(false);
   const environment = useEnvironment({ files: "/potsdamer_platz_1k.hdr" });
   const octahedralDataRef = useRef(null);
-
-  // Get model path from mesh userData (same way drei stores it)
-  const modelPath = mesh?.userData?.__impostorSourceId || null;
-
-  // Load the GLTF model using drei's useGLTF (same method as TreeOctahedralImpostor)
-  const gltfScene = useGLTF(modelPath || "/dummy.glb");
 
   // Build octahedral mesh data
   const octahedralData = useMemo(() => {
@@ -85,27 +97,11 @@ export function useOctahedralAtlasCompute({
 
   octahedralDataRef.current = octahedralData;
 
-  // Calculate effective atlas size (may be reduced for optimization)
-  const effectiveAtlasSize = useMemo(() => {
-    const requestedSize = Math.min(atlasSize, MAX_COMPUTE_ATLAS_SIZE);
-    if (optimizeSize) {
-      // Reduce atlas size by 50% to save VRAM (can be adjusted)
-      return Math.max(512, Math.floor(requestedSize * 0.5));
-    }
-    return requestedSize;
-  }, [atlasSize, optimizeSize]);
+  const effectiveAtlasSize = Math.min(atlasSize, MAX_COMPUTE_ATLAS_SIZE);
 
   // Generate atlas using WebGPU compute shaders
   useEffect(() => {
-    // Wait for gltfScene to load if using modelPath
-    if (modelPath && (!gltfScene || !gltfScene.scene)) {
-      return; // Still loading
-    }
-
-    // Only proceed if we have either mesh or a valid gltfScene
-    const hasValidSource = mesh || (modelPath && gltfScene?.scene);
-
-    if (!enabled || !hasValidSource || !octahedralData || !gl) {
+    if (!enabled || !source || !octahedralData || !gl) {
       setAtlas(null);
       return;
     }
@@ -114,7 +110,7 @@ export function useOctahedralAtlasCompute({
       mesh,
       gridSize,
       effectiveAtlasSize,
-      octType
+      octType,
     );
 
     if (cacheKey && atlasCache.has(cacheKey)) {
@@ -148,23 +144,17 @@ export function useOctahedralAtlasCompute({
     try {
       const atlasPromise = generateAtlasWithCompute({
         environment,
-        gltfScene: modelPath ? gltfScene : null,
-        mesh,
+        source,
         octahedralData,
         gridSize,
         atlasSize: effectiveAtlasSize,
-        atlasCoverage,
         gl,
         camera,
-        usePostProcessing,
-        brightness,
-        contrast,
-        usePostDilatation,
-        dilationRadius,
       }).then(
-        (texture) => {
+        ({ texture, normalDepthTexture }) => {
           const atlasPayload = {
             texture,
+            normalDepthTexture,
             gridSize,
             octType,
             octahedralData,
@@ -184,7 +174,7 @@ export function useOctahedralAtlasCompute({
           setError(err);
           setIsGenerating(false);
           throw err;
-        }
+        },
       );
 
       if (cacheKey) {
@@ -203,25 +193,16 @@ export function useOctahedralAtlasCompute({
     }
   }, [
     mesh,
-    gltfScene,
-    modelPath,
+    source,
     octahedralData,
     gridSize,
     effectiveAtlasSize,
-    atlasSize,
     enabled,
     gl,
     scene,
     camera,
     octType,
     environment,
-    usePostProcessing,
-    brightness,
-    contrast,
-    optimizeSize,
-    atlasCoverage,
-    usePostDilatation,
-    dilationRadius,
   ]);
 
   return {
@@ -233,25 +214,32 @@ export function useOctahedralAtlasCompute({
 }
 
 /**
+ * Bakes share the app's renderer and await GPU work between cells. Two bakes
+ * interleaving would each capture the other's cell target as the "original"
+ * render target and restore it at the end, leaving the canvas drawing into a
+ * disposed offscreen target. Run them one at a time.
+ */
+let bakeQueue = Promise.resolve();
+
+function generateAtlasWithCompute(params) {
+  const run = bakeQueue.then(() => generateAtlasNow(params));
+  bakeQueue = run.catch(() => {});
+  return run;
+}
+
+/**
  * Generates the octahedral impostor atlas using WebGPU compute shaders.
  * This version uses StorageTexture for direct GPU-based processing.
  * @param {Object} params - Generation parameters
  */
-async function generateAtlasWithCompute({
+async function generateAtlasNow({
   environment,
-  gltfScene,
-  mesh,
+  source,
   octahedralData,
   gridSize,
   atlasSize,
-  atlasCoverage = 1.0,
   gl,
   camera,
-  usePostProcessing,
-  brightness,
-  contrast,
-  usePostDilatation = false,
-  dilationRadius = 1,
 }) {
   console.log("🚀 Starting WebGPU Compute-based atlas generation...");
 
@@ -259,7 +247,7 @@ async function generateAtlasWithCompute({
   const renderGroup = new THREE.Group();
   let meshCount = 0;
 
-  const sourceScene = gltfScene?.scene || mesh;
+  const sourceScene = source;
 
   if (sourceScene) {
     sourceScene.traverse((child) => {
@@ -369,11 +357,6 @@ async function generateAtlasWithCompute({
 
       const geometry = node.geometry;
       geometry.computeBoundingSphere();
-      if (geometry.boundingSphere) {
-        const center = geometry.boundingSphere.center.clone();
-        geometry.translate(-center.x, -center.y, -center.z);
-        node.position.add(center);
-      }
     }
   });
 
@@ -408,6 +391,10 @@ async function generateAtlasWithCompute({
   renderMesh.position.copy(center).multiplyScalar(-scaleFactor);
   renderMesh.updateMatrixWorld(true);
 
+  // "surface" bakes render every cell twice through per-mesh override
+  // materials: unlit colour, then view-space normal + depth.
+  const surfacePasses = createSurfacePassMaterials(renderMesh);
+
   // Set up orthographic camera
   const orthoSize = 0.5;
   const renderCam = new THREE.OrthographicCamera(
@@ -416,29 +403,32 @@ async function generateAtlasWithCompute({
     orthoSize,
     -orthoSize,
     0.001,
-    100
+    100,
   );
 
   // Save original render state
   const originalRenderTarget = gl.getRenderTarget();
   const originalClearColor = new THREE.Color();
   gl.getClearColor(originalClearColor);
+  const originalClearAlpha = gl.getClearAlpha();
 
   // The octahedral grid has (gridSize + 1) viewpoint vertices per side, so the
   // atlas stores (gridSize + 1) frames per side. The cell stride must match the
   // vertex stride used by the sampling/material code (gridSize + 1), otherwise
   // baked viewpoints land in the wrong cells and the view shears with elevation.
   const numFrames = gridSize + 1;
-  // Apply atlas coverage to cell size calculation
-  // Coverage < 1.0 means we use less of each cell, so we can render at higher resolution
-  const effectiveCellSize = Math.floor((atlasSize / numFrames) * atlasCoverage);
-  const cellSize = Math.max(1, effectiveCellSize);
+  const cellSize = Math.max(1, Math.floor(atlasSize / numFrames));
 
   const { pntOct } = octahedralData;
 
   // 🚀 CREATE STORAGE TEXTURE FOR ATLAS (WebGPU Compute)
   console.log("🚀 Creating StorageTexture for atlas...");
   const storageTexture = createStorageTexture(atlasSize, atlasSize);
+  // Surface bakes keep linear colour and normals in half floats until the
+  // final blit; 8-bit linear storage bands badly in the dark leaf tones.
+  const normalStorageTexture = createStorageTexture(atlasSize, atlasSize);
+  storageTexture.type = THREE.HalfFloatType;
+  normalStorageTexture.type = THREE.HalfFloatType;
 
   // Create temporary render target for each cell
   // In WebGPU, we use THREE.RenderTarget (not WebGPURenderTarget)
@@ -451,6 +441,48 @@ async function generateAtlasWithCompute({
   });
 
   console.log(`✓ Created ${cellSize}x${cellSize} render target for cells`);
+
+  // One copy kernel per destination, built once and moved between cells by
+  // its offset uniforms. Building a fresh node graph per cell made three
+  // re-run node analysis and WGSL generation for every one of the
+  // (gridSize + 1)^2 cells, even though the pipeline itself was cached.
+  const copyKernels = new Map();
+  const copyKernelFor = (target) => {
+    if (!copyKernels.has(target)) {
+      copyKernels.set(
+        target,
+        createAtlasCopyComputeShader({
+          sourceTexture: cellRenderTarget.texture,
+          targetStorageTexture: target,
+          cellSize,
+          targetX: 0,
+          targetY: 0,
+          atlasSize,
+        }),
+      );
+    }
+    return copyKernels.get(target);
+  };
+
+  // Renders the current materials into the cell target and copies the cell
+  // into `target` at (pixelX, pixelY).
+  const renderCell = async (target, pixelX, pixelY) => {
+    gl.setRenderTarget(cellRenderTarget);
+    gl.setClearColor(0x000000, 0);
+    gl.clear();
+    gl.render(renderScene, renderCam);
+    // Hand the renderer back before awaiting: the app's own frame can run
+    // during the await and must not draw into this offscreen target.
+    gl.setRenderTarget(originalRenderTarget);
+    gl.setClearColor(originalClearColor, originalClearAlpha);
+
+    // 🚀 USE COMPUTE SHADER TO COPY CELL TO STORAGE TEXTURE
+    const { computeNode, cellOffsetXUniform, cellOffsetYUniform } =
+      copyKernelFor(target);
+    cellOffsetXUniform.value = pixelX;
+    cellOffsetYUniform.value = pixelY;
+    await gl.computeAsync(computeNode);
+  };
 
   // Render each cell and copy to StorageTexture using compute shader
   let renderedCells = 0;
@@ -472,30 +504,13 @@ async function generateAtlasWithCompute({
       renderCam.position.copy(viewDir.multiplyScalar(cameraDistance));
       renderCam.lookAt(0, 0, 0);
 
-      // Render to temporary target
-      gl.setRenderTarget(cellRenderTarget);
-      gl.setClearColor(0x000000, 0);
-      gl.clear();
-      gl.render(renderScene, renderCam);
-
-      // 🚀 USE COMPUTE SHADER TO COPY CELL TO STORAGE TEXTURE
       const pixelX = Math.floor((colIdx / numFrames) * atlasSize);
       const pixelY = Math.floor((rowIdx / numFrames) * atlasSize);
 
-      // Create compute shader for this cell
-      const cellTexture = cellRenderTarget.texture;
-      const { computeNode, cellOffsetXUniform, cellOffsetYUniform } =
-        createAtlasCopyComputeShader({
-          sourceTexture: cellTexture,
-          targetStorageTexture: storageTexture,
-          cellSize,
-          targetX: pixelX,
-          targetY: pixelY,
-          atlasSize,
-        });
-
-      // Execute compute shader
-      await gl.computeAsync(computeNode);
+      surfacePasses.use("albedo");
+      await renderCell(storageTexture, pixelX, pixelY);
+      surfacePasses.use("normalDepth");
+      await renderCell(normalStorageTexture, pixelX, pixelY);
 
       renderedCells++;
 
@@ -503,7 +518,7 @@ async function generateAtlasWithCompute({
       if (renderedCells % 50 === 0 || renderedCells === numFrames ** 2) {
         const elapsed = ((performance.now() - startTime) / 1000).toFixed(2);
         console.log(
-          `⏳ Progress: ${renderedCells}/${numFrames ** 2} cells (${elapsed}s)`
+          `⏳ Progress: ${renderedCells}/${numFrames ** 2} cells (${elapsed}s)`,
         );
       }
     }
@@ -512,51 +527,10 @@ async function generateAtlasWithCompute({
   const renderTime = ((performance.now() - startTime) / 1000).toFixed(2);
   console.log(`✓ Rendered ${renderedCells} cells in ${renderTime}s`);
 
-  // 🚀 OPTIONAL: POST-PROCESS ATLAS USING COMPUTE SHADER
-  let finalTexture = storageTexture;
-
-  // Apply post-processing (brightness/contrast)
-  if (usePostProcessing && (brightness !== 1.0 || contrast !== 1.0)) {
-    console.log("🚀 Applying post-processing with compute shader...");
-
-    const postProcessedStorage = createStorageTexture(atlasSize, atlasSize);
-
-    const { computeNode } = createAtlasPostProcessShader({
-      sourceTexture: finalTexture,
-      targetStorageTexture: postProcessedStorage,
-      atlasSize,
-      brightness,
-      contrast,
-    });
-
-    await gl.computeAsync(computeNode);
-    console.log("✓ Post-processing complete");
-
-    finalTexture = postProcessedStorage;
-  }
-
-  // Apply post-dilatation (expand textures to avoid bleeding)
-  if (usePostDilatation) {
-    console.log("🚀 Applying post-dilatation with compute shader...");
-
-    const dilatedStorage = createStorageTexture(atlasSize, atlasSize);
-
-    const { computeNode } = createAtlasDilatationShader({
-      sourceTexture: finalTexture,
-      targetStorageTexture: dilatedStorage,
-      atlasSize,
-      gridSize,
-      dilationRadius,
-    });
-
-    await gl.computeAsync(computeNode);
-    console.log("✓ Post-dilatation complete");
-
-    finalTexture = dilatedStorage;
-  }
-
   // Cleanup temporary resources
+  for (const { computeNode } of copyKernels.values()) computeNode.dispose?.();
   cellRenderTarget.dispose();
+  surfacePasses.dispose();
 
   // StorageTextures are write targets for compute shaders, not meant to be
   // sampled repeatedly by a regular render-pass material long term: three's
@@ -565,61 +539,164 @@ async function generateAtlasWithCompute({
   // which throws "Texture already initialized" once it's bound by an actual
   // mesh material across multiple frames. Blit the finished atlas into a
   // plain RenderTarget texture once here, and use that for sampling instead.
-  const blitRenderTarget = new THREE.RenderTarget(atlasSize, atlasSize, {
-    format: THREE.RGBAFormat,
-    type: THREE.UnsignedByteType,
-    minFilter: THREE.LinearFilter,
-    magFilter: THREE.LinearFilter,
-    generateMipmaps: false,
-  });
+  //
+  // Colour goes into a real sRGB target (encoded on write, decoded on read,
+  // so the material samples the exact linear albedo), normals/depth into a
+  // linear one.
+  const atlasTexture = blitToSampleableTexture(
+    gl,
+    storageTexture,
+    atlasSize,
+    THREE.SRGBColorSpace,
+  );
+  const normalDepthTexture = blitToSampleableTexture(
+    gl,
+    normalStorageTexture,
+    atlasSize,
+    THREE.NoColorSpace,
+  );
 
-  const blitMaterial = new THREE.MeshBasicNodeMaterial();
-  blitMaterial.colorNode = texture(finalTexture);
-  blitMaterial.transparent = true;
-
-  const blitScene = new THREE.Scene();
-  const blitGeometry = new THREE.PlaneGeometry(2, 2);
-  const blitMesh = new THREE.Mesh(blitGeometry, blitMaterial);
-  blitScene.add(blitMesh);
-
-  const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
-  blitCamera.position.set(0, 0, 1);
-  blitCamera.lookAt(0, 0, 0);
-
-  gl.setRenderTarget(blitRenderTarget);
-  gl.render(blitScene, blitCamera);
-
-  blitGeometry.dispose();
-  blitMaterial.dispose();
   storageTexture.dispose();
-  if (finalTexture !== storageTexture) {
-    finalTexture.dispose();
-  }
-
-  const atlasTexture = blitRenderTarget.texture;
-  atlasTexture.flipY = false;
-  atlasTexture.minFilter = THREE.LinearFilter;
-  atlasTexture.magFilter = THREE.LinearFilter;
-  atlasTexture.wrapS = THREE.ClampToEdgeWrapping;
-  atlasTexture.wrapT = THREE.ClampToEdgeWrapping;
-
-  if (gl && gl.outputColorSpace !== undefined) {
-    atlasTexture.colorSpace = gl.outputColorSpace;
-  } else {
-    atlasTexture.colorSpace = THREE.SRGBColorSpace;
-  }
+  normalStorageTexture.dispose();
 
   console.log("✅ Atlas generation complete!");
   console.log(`📊 Stats: ${renderedCells} cells, ${renderTime}s total`);
 
   // Restore original state
   gl.setRenderTarget(originalRenderTarget);
-  gl.setClearColor(originalClearColor);
+  gl.setClearColor(originalClearColor, originalClearAlpha);
 
   // Cleanup
   renderScene.remove(renderMesh);
   renderMesh.geometry?.dispose();
   renderMesh.material?.dispose();
 
-  return atlasTexture;
+  return { texture: atlasTexture, normalDepthTexture };
+}
+
+/**
+ * Copies a finished storage atlas into a regular render-target texture that
+ * materials can sample every frame. `colorSpace` is set on the target before
+ * rendering, so an sRGB target encodes on write, and the copy is exact (no
+ * blending, no tone mapping).
+ */
+function blitToSampleableTexture(gl, sourceTexture, atlasSize, colorSpace) {
+  const target = new THREE.RenderTarget(atlasSize, atlasSize, {
+    format: THREE.RGBAFormat,
+    type: THREE.UnsignedByteType,
+    minFilter: THREE.LinearFilter,
+    magFilter: THREE.LinearFilter,
+    generateMipmaps: false,
+    colorSpace,
+  });
+
+  const blitMaterial = new THREE.MeshBasicNodeMaterial();
+  blitMaterial.colorNode = texture(sourceTexture);
+  // A straight copy: no blending into the cleared target, no tone mapping.
+  blitMaterial.transparent = false;
+  blitMaterial.blending = THREE.NoBlending;
+  blitMaterial.toneMapped = false;
+
+  const blitScene = new THREE.Scene();
+  const blitGeometry = new THREE.PlaneGeometry(2, 2);
+  blitScene.add(new THREE.Mesh(blitGeometry, blitMaterial));
+
+  const blitCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 10);
+  blitCamera.position.set(0, 0, 1);
+  blitCamera.lookAt(0, 0, 0);
+
+  const previousTarget = gl.getRenderTarget();
+  gl.setRenderTarget(target);
+  gl.render(blitScene, blitCamera);
+  gl.setRenderTarget(previousTarget);
+
+  blitGeometry.dispose();
+  blitMaterial.dispose();
+
+  const result = target.texture;
+  result.flipY = false;
+  result.minFilter = THREE.LinearFilter;
+  result.magFilter = THREE.LinearFilter;
+  result.wrapS = THREE.ClampToEdgeWrapping;
+  result.wrapT = THREE.ClampToEdgeWrapping;
+  result.colorSpace = colorSpace;
+  return result;
+}
+
+/**
+ * Per-mesh override materials for a "surface" bake. `albedo` renders each
+ * material's unlit colour (its colorNode, else map × color) with its alpha
+ * cutout; `normalDepth` renders its shading normal (its normalNode, else the
+ * geometry normal) in bake-camera view space plus the distance from the bake
+ * camera, masked by the same cutout so both atlases share one silhouette.
+ */
+function createSurfacePassMaterials(root) {
+  const entries = [];
+  root.traverse((node) => {
+    if (!(node instanceof THREE.Mesh) || !node.material) return;
+    const sources = Array.isArray(node.material)
+      ? node.material
+      : [node.material];
+    const albedo = [];
+    const normalDepth = [];
+    for (const source of sources) {
+      const baseColor = source.colorNode
+        ? vec4(source.colorNode)
+        : source.map
+          ? texture(source.map).mul(
+              vec4(source.color ?? new THREE.Color(1, 1, 1), 1),
+            )
+          : vec4(source.color ?? new THREE.Color(1, 1, 1), 1);
+      const cutoff = source.alphaTest > 0 ? source.alphaTest : 0.5;
+
+      // Coverage is binary: a fragment either survives the material's cutout
+      // (coverage 1) or leaves the cleared background (0). Source alpha itself
+      // is not coverage (foliage atlases often keep partial alpha inside the
+      // leaf and rely on alphaTest), so both passes cut out via maskNode and
+      // write full-coverage values; the cleared background makes the atlases
+      // premultiplied (see the "surface" bake notes above).
+      const kept = baseColor.a.greaterThan(float(cutoff));
+
+      const albedoMaterial = new THREE.MeshBasicNodeMaterial({
+        side: source.side,
+      });
+      albedoMaterial.colorNode = vec4(baseColor.rgb, 1);
+      albedoMaterial.maskNode = kept;
+      albedoMaterial.blending = THREE.NoBlending;
+      albedoMaterial.toneMapped = false;
+      albedo.push(albedoMaterial);
+
+      const shadingNormal = normalize(source.normalNode ?? normalView);
+      const normalMaterial = new THREE.MeshBasicNodeMaterial({
+        side: source.side,
+      });
+      normalMaterial.colorNode = vec4(
+        shadingNormal.mul(0.5).add(0.5),
+        positionView.z.negate().clamp(0, 1),
+      );
+      // The alpha channel carries depth, so the cutout goes through maskNode instead of alphaTest.
+      normalMaterial.maskNode = kept;
+      normalMaterial.blending = THREE.NoBlending;
+      normalMaterial.toneMapped = false;
+      normalDepth.push(normalMaterial);
+    }
+    const single = !Array.isArray(node.material);
+    entries.push({
+      node,
+      albedo: single ? albedo[0] : albedo,
+      normalDepth: single ? normalDepth[0] : normalDepth,
+    });
+  });
+
+  return {
+    use(pass) {
+      for (const entry of entries) entry.node.material = entry[pass];
+    },
+    dispose() {
+      for (const entry of entries) {
+        for (const material of [entry.albedo, entry.normalDepth].flat())
+          material.dispose();
+      }
+    },
+  };
 }

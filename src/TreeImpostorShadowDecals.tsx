@@ -12,10 +12,9 @@ import {
 } from "three/tsl";
 import { sampleOctahedralDirection } from "./utils/octahedralImpostorMath";
 
-// Must match ALIGNMENT_OFFSET_RADIANS in useInstancedOctahedralImpostorMesh -
-// the baked atlas azimuth is rotated 90 degrees relative to the sampling
+// The baked atlas azimuth is rotated 90 degrees relative to the sampling
 // convention, and the shadow silhouette lookup goes through the same table.
-const ALIGNMENT_OFFSET_RADIANS = -Math.PI / 2;
+import { ALIGNMENT_OFFSET_RADIANS } from "./utils/InstancedOctahedralImpostorMaterial";
 
 const tempObject = new THREE.Object3D();
 tempObject.rotation.order = "YXZ";
@@ -44,7 +43,6 @@ export default function TreeImpostorShadowDecals({
   atlas,
   samplingCache,
   gridSize,
-  atlasCoverage = 1.0,
   geometryArgs = [2, 2],
   groundY = -2,
   sunPosition = [35, 55, 35],
@@ -89,7 +87,6 @@ export default function TreeImpostorShadowDecals({
     const material = createShadowDecalMaterial({
       atlasTexture: atlas.texture,
       gridSize,
-      atlasCoverage,
       opacity,
     });
 
@@ -140,9 +137,12 @@ export default function TreeImpostorShadowDecals({
       // The impostor quad is centered on instance.position, so the visible
       // treetop sits half a quad above it; shadow length follows from the
       // height of that top edge above the ground plane.
+      // On terrain, a placement carries the trunk-base height under this
+      // instance; the flat `groundY` is the fallback for planar fields.
+      const baseY = instance.placement?.position[1] ?? groundY;
       const halfHeight = (planeHeight * instance.scale[1]) / 2;
       const heightAboveGround = Math.max(
-        instance.position[1] + halfHeight - groundY,
+        instance.position[1] + halfHeight - baseY,
         0.5
       );
       const length = heightAboveGround * stretch;
@@ -151,7 +151,7 @@ export default function TreeImpostorShadowDecals({
 
       tempObject.position.set(
         instance.position[0] + shadowDirX * length * 0.5,
-        groundY + 0.05,
+        baseY + 0.05,
         instance.position[2] + shadowDirZ * length * 0.5
       );
       tempObject.rotation.set(-Math.PI / 2, quadYaw, 0);
@@ -167,7 +167,6 @@ export default function TreeImpostorShadowDecals({
     atlas,
     samplingCache,
     gridSize,
-    atlasCoverage,
     geometryArgs.join(","),
     groundY,
     sunPosition.join(","),
@@ -189,12 +188,7 @@ export default function TreeImpostorShadowDecals({
   return <primitive object={shadowMesh} />;
 }
 
-function createShadowDecalMaterial({
-  atlasTexture,
-  gridSize,
-  atlasCoverage,
-  opacity,
-}) {
+function createShadowDecalMaterial({ atlasTexture, gridSize, opacity }) {
   const material = new THREE.MeshBasicNodeMaterial();
   material.transparent = true;
   material.depthWrite = false;
@@ -228,20 +222,19 @@ function createShadowDecalMaterial({
   const weightB = faceWeights.y.div(weightSum.max(0.0001));
   const weightC = faceWeights.z.div(weightSum.max(0.0001));
 
-  const coverageOffset = float((1 - atlasCoverage) * 0.5);
-  const coverageScale = float(atlasCoverage);
   const epsilon = float(0.002);
 
-  // Silhouette alpha at a quad-local uv: same coverage remap, horizontal
-  // flip and 3-cell barycentric blend as the impostor color lookup, but only
-  // the alpha channel is needed.
+  // Silhouette alpha at a quad-local uv: same horizontal flip and 3-cell
+  // barycentric blend as the impostor color lookup, but only the alpha
+  // channel is needed.
   const silhouetteAlpha = (localUv) => {
-    const scaledU = localUv.x.mul(coverageScale).add(coverageOffset);
-    const scaledV = localUv.y.mul(coverageScale).add(coverageOffset);
-    const flippedU = float(1.0).sub(scaledU.clamp(0.0, 1.0));
+    const flippedU = float(1.0).sub(localUv.x.clamp(0.0, 1.0));
     const safeUv = vec2(
       flippedU.mul(float(1.0).sub(epsilon.mul(2.0))).add(epsilon),
-      scaledV.clamp(0.0, 1.0).mul(float(1.0).sub(epsilon.mul(2.0))).add(epsilon)
+      localUv.y
+        .clamp(0.0, 1.0)
+        .mul(float(1.0).sub(epsilon.mul(2.0)))
+        .add(epsilon)
     );
 
     const alphaA = atlasNode

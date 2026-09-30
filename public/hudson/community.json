@@ -1,0 +1,52 @@
+{
+  "name": "Hudson Terrace",
+  "areaId": "019a2a29-1f9f-712c-b33c-a6da7a7a0382",
+  "latitude": 36.517905852638634,
+  "longitude": -82.26551102041725,
+  "srid": 32617,
+  "dimensions": [
+    909.043,
+    1194.1689999999999
+  ],
+  "modelUrl": null,
+  "textures": {
+    "way_surface_concrete": {
+      "CURB_BASE_COLOR": "textures/way_surface_concrete__curb_base_color.ktx2"
+    },
+    "way_surface_asphalt": {
+      "Node.002": "textures/way_surface_asphalt__node.002.ktx2",
+      "Node.001": "textures/way_surface_asphalt__node.001.ktx2",
+      "Node": "textures/way_surface_asphalt__node.ktx2",
+      "Node.003": "textures/way_surface_asphalt__node.003.ktx2"
+    },
+    "way_surface_gravel": {
+      "Image Texture": "textures/way_surface_gravel__image_texture.ktx2",
+      "Image Texture.001": "textures/way_surface_gravel__image_texture.001.ktx2"
+    },
+    "lake_water": {
+      "Image Texture": "textures/lake_water__image_texture.ktx2",
+      "Image Texture.002": "textures/lake_water__image_texture.002.ktx2"
+    },
+    "lake_bed": {
+      "Image Texture": "textures/lake_bed__image_texture.ktx2",
+      "Image Texture.002": "textures/lake_bed__image_texture.002.ktx2"
+    },
+    "ground": {
+      "wood_mask": "textures/ground__wood_mask.ktx2",
+      "Image Texture.001": "textures/ground__image_texture.001.ktx2",
+      "Image Texture.005": "textures/ground__image_texture.005.ktx2",
+      "Image Texture.003": "textures/ground__image_texture.003.ktx2",
+      "urban_area_mask": "textures/ground__urban_area_mask.ktx2"
+    },
+    "way_surface_asphalt_light": {
+      "Node.002": "textures/way_surface_asphalt_light__node.002.ktx2",
+      "Node.001": "textures/way_surface_asphalt_light__node.001.ktx2",
+      "Node": "textures/way_surface_asphalt_light__node.ktx2",
+      "Node.003": "textures/way_surface_asphalt_light__node.003.ktx2"
+    },
+    "way_curb": {
+      "CURB_BASE_COLOR": "textures/way_curb__curb_base_color.ktx2"
+    }
+  },
+  "generatedAt": "2026-09-28T07:06:26.769Z"
+}

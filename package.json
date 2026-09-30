@@ -1,5 +1,5 @@
 {
-  "name": "impostors-by-anderson-mancini",
+  "name": "lod-impostors",
   "version": "1.0.0",
   "description": "WebGPU Impostors using Threejs in TSL + R3F",
   "author": "Anderson Mancini",
@@ -30,6 +30,9 @@
     "vercel": "^48.2.9"
   },
   "devDependencies": {
+    "@gltf-transform/core": "^4.5.0",
+    "@gltf-transform/extensions": "^4.5.0",
+    "@gltf-transform/functions": "^4.5.0",
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^4.2.1",

@@ -2,7 +2,6 @@ import { useMemo } from "react";
 import * as THREE from "three/webgpu";
 import { useFrame, useThree } from "@react-three/fiber";
 import { useGLTF } from "@react-three/drei";
-import { getSamplingCache } from "./utils/octahedralImpostorMath";
 import { generateFieldInstances } from "./utils/generateFieldInstances";
 import { useOctahedralAtlasCompute } from "./hooks/useOctahedralAtlasCompute";
 import { useInstancedOctahedralImpostorMesh } from "./hooks/useInstancedOctahedralImpostorMesh";
@@ -46,7 +45,6 @@ export default function TreeOctahedralImpostorFieldCompute({
   atlasCoverage = 1.0,
   usePostDilatation = false,
   dilationRadius = 1,
-  directionThresholdRadians = 0.0872665,
   useDither = false,
 }) {
   const { camera } = useThree();
@@ -118,23 +116,16 @@ export default function TreeOctahedralImpostorFieldCompute({
     dilationRadius,
   });
 
-  const samplingCache = useMemo(
-    () => getSamplingCache(octType, gridSize),
-    [octType, gridSize]
-  );
-
   const { instancedMesh, updateFrame } = useInstancedOctahedralImpostorMesh({
     instances,
     atlas,
     gridSize,
     octType,
-    samplingCache,
     geometryArgs,
     atlasCoverage,
     alphaTest,
     useDither,
     showWireframe,
-    directionThresholdRadians,
   });
 
   useFrame(() => {
